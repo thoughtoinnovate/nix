@@ -1,4 +1,4 @@
-{ ghostty }:
+{ ghostty, dotfiles }:
 
 final: prev: {
   # Expose ghostty as a package
@@ -62,34 +62,19 @@ final: prev: {
         export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
         
         echo "✅ Linux desktop integration complete!"
-        echo "💡 Add this to your ~/.bashrc for permanent integration:"
-        echo "    export XDG_DATA_DIRS=\"\$HOME/.nix-profile/share:\$XDG_DATA_DIRS\""
-        echo "🔄 Log out and back in, or restart your desktop environment"
         ;;
         
       Darwin*)
-        echo "🍎 Detected macOS"
-        echo "ℹ️  For macOS app integration, use nix-darwin:"
-        echo "    https://github.com/LnL7/nix-darwin"
-        echo "💡 nix-darwin automatically handles .app bundle integration with Spotlight"
-        ;;
-        
-      CYGWIN*|MINGW*|MSYS*)
-        echo "🪟 Detected Windows/WSL environment"
-        echo "ℹ️  For Windows integration, consider:"
-        echo "    - WSLg for GUI app integration"
-        echo "    - NixOS-WSL for better Nix integration"
-        echo "    - Manual shortcuts in Start Menu"
+        echo "🍎 Detected macOS - use nix-darwin for app integration"
         ;;
         
       *)
         echo "❓ Unknown operating system: $(uname -s)"
-        echo "ℹ️  Desktop integration not available for this platform"
         ;;
     esac
   '';
 
-  # Host OS terminal environment (just Ghostty)
+  # Host OS terminal environment
   base = prev.buildEnv {
     name = "host-terminal-environment";
     paths = final.hostOSPackages;
@@ -103,40 +88,157 @@ final: prev: {
     pathsToLink = [ "/bin" "/share" "/lib" ];
   };
 
-  # Base shell configurations
-  baseShellHook = ''
-    export STARSHIP_CONFIG=${../dotfiles/starship.toml}
-    
-    if command -v fish >/dev/null 2>&1; then
-      if [[ "$SHELL" != *"fish"* ]]; then
-        export SHELL=$(which fish)
-      fi
-      eval "$(starship init fish 2>/dev/null || starship init bash)"
+  # Base shell creation function with Fish as default and universal env vars
+  mkBaseDevShell = { 
+    extraPackages ? [], 
+    extraShellHook ? "", 
+    useBash ? false  # Changed: now useBash instead of useFish, Fish is default
+  }: 
+    let
+      # Universal environment variables (automatically exported by mkShell)
+      commonEnvVars = {
+        JAVA_HOME = "${final.corretto21}";
+        EDITOR = "nvim";
+        TERM = "xterm-256color";
+      } // (if builtins.pathExists "${dotfiles}/starship.toml" 
+           then { STARSHIP_CONFIG = "${dotfiles}/starship.toml"; }
+           else {});
+      
+      # Common informational output
+      commonInfo = ''
+        echo "🖥️ Development environment loaded"
+        echo "☕ Java: $(java -version 2>&1 | head -n1)"
+        echo "📦 Editor: $EDITOR"
+        echo "⭐ Starship config: ''${STARSHIP_CONFIG:-default}"
+        echo "💡 Platform: ${final.system}"
+        echo "🔧 Run 'setup-nix-desktop' for GUI app integration"
+        echo ""
+      '';
+      
+      # Bash/Zsh specific setup (fallback)
+      bashSetup = ''
+        ${commonInfo}
+        echo "🚀 Running in Bash/Zsh mode"
+        echo "💡 To use Fish (recommended): 'fish'"
+        echo ""
+        
+        # Set XDG_DATA_DIRS for Linux desktop integration
+        case "$(uname -s)" in
+          Linux*)
+            export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+            ;;
+        esac
+        
+        # Initialize Starship for bash/zsh
+        if [ -n "$BASH_VERSION" ]; then
+          eval "$(starship init bash)"
+        elif [ -n "$ZSH_VERSION" ]; then
+          eval "$(starship init zsh)"
+        else
+          eval "$(starship init bash)"  # fallback
+        fi
+      '';
+      
+      # Fish specific setup (default)
+      fishSetup = ''
+        ${commonInfo}
+        echo "🐠 Preparing Fish shell as default..."
+        
+        # Set XDG_DATA_DIRS for Linux desktop integration
+        case "$(uname -s)" in
+          Linux*)
+            export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+            ;;
+        esac
+        
+        # Create fish configuration directory
+        mkdir -p ~/.config/fish/conf.d/
+        
+        # Create fish devshell config that inherits environment variables
+        cat > ~/.config/fish/conf.d/nix-devshell.fish << 'EOF'
+        # Auto-generated nix devshell config for Fish
+        # Environment variables are automatically inherited from mkShell
+        
+        # Set XDG_DATA_DIRS for Linux desktop integration
+        switch (uname -s)
+          case Linux
+            set -gx XDG_DATA_DIRS "$HOME/.nix-profile/share:$XDG_DATA_DIRS"
+        end
+        
+        # Initialize starship prompt
+        if command -v starship > /dev/null
+          starship init fish | source
+        end
+        
+        # Custom fish greeting for devshell
+        function fish_greeting
+          echo "🐠 Fish development shell ready!"
+        end
+        EOF
+        
+        # Also ensure fish configuration loads properly
+        touch ~/.config/fish/config.fish
+      '';
+      
+    in if useBash then
+      # Bash mode (fallback)
+      prev.mkShell (commonEnvVars // {
+        buildInputs = final.baseDevShellPackages ++ extraPackages;
+        shellHook = bashSetup + extraShellHook + ''
+          echo "💡 Switch to Fish anytime: 'fish'"
+        '';
+      })
     else
-      eval "$(starship init bash)"
+      # Fish mode (default)
+      prev.mkShell (commonEnvVars // {
+        buildInputs = final.baseDevShellPackages ++ extraPackages;
+        shellHook = fishSetup + extraShellHook + ''
+          echo "🐠 Starting Fish shell..."
+          exec fish
+        '';
+      });
+
+  # Convenience functions
+  mkBaseFishDevShell = { extraPackages ? [], extraShellHook ? "" }:
+    final.mkBaseDevShell { inherit extraPackages extraShellHook; }; # Fish is now default
+
+  mkBaseBashDevShell = { extraPackages ? [], extraShellHook ? "" }:
+    final.mkBaseDevShell { inherit extraPackages extraShellHook; useBash = true; };
+
+  # Helper to set fish as system default (for permanent setup)
+  setup-fish-default = prev.writeShellScriptBin "setup-fish-default" ''
+    echo "🐠 Setting up Fish as system default shell..."
+    
+    # Add fish to /etc/shells if not already there
+    if ! grep -q "$(which fish)" /etc/shells 2>/dev/null; then
+      echo "Adding fish to /etc/shells (requires sudo)"
+      echo "$(which fish)" | sudo tee -a /etc/shells
     fi
     
-    export JAVA_HOME=${final.corretto21}
+    # Change user's default shell to fish
+    echo "Setting fish as default shell for $USER (requires password)"
+    chsh -s "$(which fish)"
     
-    # Set XDG_DATA_DIRS on Linux for desktop integration
-    case "$(uname -s)" in
-      Linux*)
-        export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-        ;;
-    esac
+    # Set up permanent starship configuration
+    mkdir -p ~/.config/fish/conf.d/
     
-    echo "🖥️ Base development environment loaded"
-    echo "🐚 Shell: Fish/Bash cross-compatible" 
-    echo "⭐ Starship with Catppuccin theme"
-    echo "☕ Java 21 (Corretto): $(java -version 2>&1 | head -n1)"
-    echo "📦 Stow available for dotfile management"
-    echo "💡 Platform: ${final.system}"
-    echo "🔧 Run 'setup-nix-desktop' for GUI app integration"
+    cat > ~/.config/fish/conf.d/starship.fish << 'EOF'
+    # Permanent Starship configuration for Fish
+    if command -v starship > /dev/null
+      starship init fish | source
+    end
+    EOF
+    
+    # Set up environment variables permanently
+    echo "# Permanent environment variables" >> ~/.config/fish/config.fish
+    echo "set -gx EDITOR nvim" >> ~/.config/fish/config.fish
+    echo "set -gx TERM xterm-256color" >> ~/.config/fish/config.fish
+    
+    if [ -f "${dotfiles}/starship.toml" ]; then
+      echo "set -gx STARSHIP_CONFIG ${dotfiles}/starship.toml" >> ~/.config/fish/config.fish
+    fi
+    
+    echo "✅ Fish configured as system default!"
+    echo "💡 Restart your terminal or run: exec fish"
   '';
-
-  # Base shell creation function
-  mkBaseDevShell = { extraPackages ? [], extraShellHook ? "" }: prev.mkShell {
-    buildInputs = final.baseDevShellPackages ++ extraPackages;
-    shellHook = final.baseShellHook + extraShellHook;
-  };
 }
