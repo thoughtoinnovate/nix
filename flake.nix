@@ -7,7 +7,6 @@
     ghostty = {
       url = "github:ghostty-org/ghostty?ref=v1.1.1";
     };
-    # Dotfiles fetched from GitHub as a non-flake; downstream can override
     dotfiles = {
       url = "github:thoughtoinnovate/dotfiles?ref=main";
       flake = false;
@@ -22,7 +21,7 @@
           config.allowUnfree = true;
           overlays = [
             (import ./overlays/base.nix { inherit ghostty dotfiles; })
-            (import ./overlays/development.nix)  # ADD THIS LINE
+            (import ./overlays/development.nix)
           ];
         };
       in {
@@ -31,9 +30,9 @@
           ghostty = pkgs.ghostty;
           
           # Bundled environments
-          terminal-tools = pkgs.terminal-tools;        # Basic terminal tools
-          development-tools = pkgs.development-tools;  # Base development tools
-          full-development = pkgs.full-development-environment; # Everything including IDEs
+          terminal-tools = pkgs.terminal-tools;
+          development-tools = pkgs.development-tools;
+          full-development = pkgs.full-development-environment;
           
           # Utility scripts
           desktop-integration = pkgs.desktop-integration;
@@ -49,10 +48,8 @@
         };
 
         devShells = {
-          # Fish is the default interactive shell
+          # Standard shells (no force flag needed anymore)
           default = pkgs.mkBaseDevShell {};
-
-          # Explicit options
           fish = pkgs.mkBaseFishDevShell {};
           bash = pkgs.mkBaseBashDevShell {};
           

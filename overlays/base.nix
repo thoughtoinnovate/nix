@@ -4,15 +4,12 @@ final: prev: {
   # Expose ghostty as a package
   ghostty = ghostty.packages.${final.system}.default;
 
-  # Default stow package list
-  dotfilesStowPackages = [
-    "fish"
-    "nvim"
-    "starship"
-    "ghostty"
-  ];
+  # Only stow packages that actually exist
+  dotfilesStowPackages = builtins.filter (pkg: 
+    builtins.pathExists "${dotfiles}/${pkg}"
+  ) [ "fish" "nvim" "starship" "ghostty" ];
 
-  # IMPORTANT: Define baseDevShellPackages as a simple list with explicit package references
+  # Base development packages
   baseDevShellPackages = [
     final.ghostty
     final.fish
@@ -26,7 +23,7 @@ final: prev: {
     final.corretto21
   ];
 
-  # Bundled environments for profile installation
+  # Bundled environments
   terminal-tools = prev.buildEnv {
     name = "terminal-tools";
     paths = [
@@ -51,56 +48,7 @@ final: prev: {
   base = final.terminal-tools;
   base-devshell = final.development-tools;
 
-  # Cross-platform desktop integration script
-  desktop-integration = prev.writeShellScriptBin "setup-nix-desktop" ''
-    echo "🖥️ Setting up Nix desktop integration..."
-    
-    case "$(uname -s)" in
-      Linux*)
-        echo "📋 Detected Linux - setting up XDG desktop integration"
-        
-        mkdir -p ~/.local/share/applications ~/.local/share/icons
-        
-        if [ -d ~/.nix-profile/share/applications ]; then
-          for app in ~/.nix-profile/share/applications/*.desktop; do
-            if [ -f "$app" ]; then
-              ln -sf "$app" ~/.local/share/applications/
-              echo "  ✓ Linked $(basename "$app")"
-            fi
-          done
-        fi
-        
-        if [ -d ~/.nix-profile/share/icons ]; then
-          for icon_dir in ~/.nix-profile/share/icons/*; do
-            if [ -d "$icon_dir" ]; then
-              target_dir=~/.local/share/icons/$(basename "$icon_dir")
-              mkdir -p "$target_dir"
-              ln -sf "$icon_dir"/* "$target_dir"/ 2>/dev/null || true
-            fi
-          done
-        fi
-        
-        if command -v update-desktop-database >/dev/null 2>&1; then
-          update-desktop-database ~/.local/share/applications 2>/dev/null || true
-          echo "  ✓ Updated desktop database"
-        fi
-        
-        export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-        
-        echo "✅ Linux desktop integration complete!"
-        ;;
-        
-      Darwin*)
-        echo "🍎 Detected macOS - use nix-darwin for app integration"
-        ;;
-        
-      *)
-        echo "❓ Unknown operating system: $(uname -s)"
-        ;;
-    esac
-  '';
-
-  # Base shell creation function
+  # Simple mkBaseDevShell
   mkBaseDevShell = {
     extraPackages ? [],
     extraShellHook ? "",
@@ -113,68 +61,70 @@ final: prev: {
         TERM = "xterm-256color";
       };
 
-      stowApply = ''
-        if command -v stow >/dev/null 2>&1; then
-          DOTFILES="${dotfiles}"
-          if [ -d "$DOTFILES" ]; then
-            echo "🔗 Stowing from: $DOTFILES -> $HOME"
-            cd "$DOTFILES"
-            for pkg in ${builtins.concatStringsSep " " final.dotfilesStowPackages}; do
+      # Simple stow integration
+      stowSetup = ''
+        echo "🔧 Setting up dotfiles integration..."
+        
+        export DOTFILES="${dotfiles}"
+        echo "📁 DOTFILES: $DOTFILES"
+        
+        if [ -d "$DOTFILES" ] && command -v stow >/dev/null 2>&1; then
+          cd "$DOTFILES"
+          
+          PACKAGES="${builtins.concatStringsSep " " final.dotfilesStowPackages}"
+          if [ -n "$PACKAGES" ]; then
+            echo "📦 Processing packages: $PACKAGES"
+            
+            for pkg in $PACKAGES; do
               if [ -d "$pkg" ]; then
-                stow --verbose=1 --restow --no-folding --target "$HOME" "$pkg" || true
-                echo "  ✓ stowed $pkg"
+                echo "  📦 $pkg - stowing dotfiles config"
+                
+                if stow --target="$HOME" "$pkg" 2>/dev/null; then
+                  echo "    ✅ $pkg stowed successfully"
+                else
+                  echo "    ⚠️  $pkg - conflicts detected, use 'dotfiles-stow' to resolve"
+                fi
+              else
+                echo "  ❌ $pkg directory not found"
               fi
             done
+          else
+            echo "📦 No stow packages found"
           fi
+          
+          echo "💡 Use 'dotfiles-stow' to manage conflicts manually"
         else
-          echo "⚠️ GNU Stow not found; ensure it's included in baseDevShellPackages"
+          echo "⚠️  Stow not available or dotfiles directory missing"
         fi
+        
+        echo "🏁 Dotfiles setup complete"
+        echo ""
       '';
 
       commonInfo = ''
-        echo "🖥️ Development environment loaded"
+        echo "🖥️  Development environment ready"
         echo "☕ Java: $(java -version 2>&1 | head -n1)"
         echo "📦 Editor: $EDITOR"
-        echo "💡 Platform: ${final.system}"
-        echo "🔧 Run 'setup-nix-desktop' for GUI app integration"
         echo ""
       '';
 
-      bashSetup = ''
+      shellSetup = if useBash then ''
         ${commonInfo}
-        echo "🚀 Running in Bash/Zsh mode"
-        echo "💡 To use Fish (recommended): 'fish'"
-        echo ""
-        case "$(uname -s)" in
-          Linux*)
-            export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-            ;;
-        esac
-        if [ -n "$BASH_VERSION" ]; then
-          eval "$(starship init bash)"
-        elif [ -n "$ZSH_VERSION" ]; then
-          eval "$(starship init zsh)"
-        else
-          eval "$(starship init bash)"
-        fi
+        echo "🚀 Running in Bash mode"
+        export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+        eval "$(starship init bash)"
+      '' else ''
+        ${commonInfo}
+        echo "🐠 Starting Fish shell..."
+        export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
       '';
 
-      fishSetup = ''
-        ${commonInfo}
-        echo "🐠 Preparing Fish shell as default..."
-        case "$(uname -s)" in
-          Linux*)
-            export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-            ;;
-        esac
-      '';
     in
     prev.mkShell (commonEnvVars // {
       buildInputs = final.baseDevShellPackages ++ extraPackages;
-      shellHook = (if useBash then bashSetup else fishSetup) + stowApply + extraShellHook + (if useBash then ''
-        echo "💡 Switch to Fish anytime: 'fish'"
+      shellHook = stowSetup + shellSetup + extraShellHook + (if useBash then ''
+        echo "💡 Switch to Fish: 'fish'"
       '' else ''
-        echo "🐠 Starting Fish shell..."
         exec fish
       '');
     });
@@ -187,32 +137,103 @@ final: prev: {
     final.mkBaseDevShell { inherit extraPackages extraShellHook; useBash = true; };
 
   # Helper scripts
+  desktop-integration = prev.writeShellScriptBin "setup-nix-desktop" ''
+    echo "🖥️ Setting up Nix desktop integration..."
+    case "$(uname -s)" in
+      Linux*)
+        mkdir -p ~/.local/share/applications ~/.local/share/icons
+        if [ -d ~/.nix-profile/share/applications ]; then
+          for app in ~/.nix-profile/share/applications/*.desktop; do
+            if [ -f "$app" ]; then
+              ln -sf "$app" ~/.local/share/applications/
+              echo "  ✓ Linked $(basename "$app")"
+            fi
+          done
+        fi
+        export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+        echo "✅ Linux desktop integration complete!"
+        ;;
+      Darwin*)
+        echo "🍎 Detected macOS - use nix-darwin for app integration"
+        ;;
+    esac
+  '';
+
   setup-fish-default = prev.writeShellScriptBin "setup-fish-default" ''
     echo "🐠 Setting up Fish as system default shell..."
-    
     if ! grep -q "$(which fish)" /etc/shells 2>/dev/null; then
       echo "Adding fish to /etc/shells (requires sudo)"
       echo "$(which fish)" | sudo tee -a /etc/shells
     fi
-    
     echo "Setting fish as default shell for $USER (requires password)"
     chsh -s "$(which fish)"
-    
     echo "✅ Fish configured as system default!"
-    echo "💡 Restart your terminal or run: exec fish"
   '';
 
+  # Simple dotfiles management tool
   dotfiles-stow = prev.writeShellScriptBin "dotfiles-stow" ''
-    set -e
     DOTFILES="${dotfiles}"
-    echo "🔗 Stowing from: $DOTFILES -> $HOME"
+    echo "🔗 Manual dotfiles management: $DOTFILES -> $HOME"
+    
     cd "$DOTFILES"
-    for pkg in ${builtins.concatStringsSep " " final.dotfilesStowPackages}; do
-      if [ -d "$pkg" ]; then
-        stow --verbose=1 --restow --no-folding --target "$HOME" "$pkg"
-        echo "  ✓ stowed $pkg"
-      fi
-    done
+    PACKAGES="${builtins.concatStringsSep " " final.dotfilesStowPackages}"
+    
+    if [ -n "$PACKAGES" ]; then
+      echo ""
+      echo "📋 Available packages: $PACKAGES"
+      echo ""
+      echo "Options:"
+      echo "  1. Show conflicts only (safe)"
+      echo "  2. Stow non-conflicting packages"
+      echo "  3. Adopt conflicting files (WARNING: modifies dotfiles)"
+      echo "  4. Override all conflicts (WARNING: overwrites files)"
+      echo ""
+      read -p "Choose (1-4): " choice
+      
+      case $choice in
+        1)
+          echo "🔍 Showing conflicts..."
+          for pkg in $PACKAGES; do
+            if [ -d "$pkg" ]; then
+              echo "--- $pkg ---"
+              stow --target="$HOME" --simulate "$pkg" 2>&1
+            fi
+          done
+          ;;
+        2)
+          echo "📦 Stowing non-conflicting packages..."
+          for pkg in $PACKAGES; do
+            if [ -d "$pkg" ]; then
+              if stow --target="$HOME" --simulate "$pkg" 2>&1 | grep -q "conflict"; then
+                echo "  ⏭️  Skipping $pkg (conflicts detected)"
+              else
+                stow --target="$HOME" "$pkg" && echo "  ✓ Stowed $pkg"
+              fi
+            fi
+          done
+          ;;
+        3)
+          echo "⚠️  Adopting conflicting files..."
+          for pkg in $PACKAGES; do
+            [ -d "$pkg" ] && stow --adopt --target="$HOME" "$pkg" && echo "  ✓ Adopted $pkg"
+          done
+          echo "⚠️  Check 'git diff' in your dotfiles - files may have changed"
+          ;;
+        4)
+          echo "⚠️  Overriding all conflicts..."
+          for pkg in $PACKAGES; do
+            [ -d "$pkg" ] && stow --override='.*' --target="$HOME" "$pkg" && echo "  ✓ Override $pkg"
+          done
+          ;;
+        *)
+          echo "❌ Invalid choice"
+          exit 1
+          ;;
+      esac
+    else
+      echo "📦 No packages found to manage"
+    fi
+    
     echo "✅ Done"
   '';
 }
