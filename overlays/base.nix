@@ -4,21 +4,52 @@ final: prev: {
   # Expose ghostty as a package
   ghostty = ghostty.packages.${final.system}.default;
 
-  # Host OS packages (terminal only)
-  hostOSPackages = [ final.ghostty ];
-
-  # DevShell base packages
-  baseDevShellPackages = with final; [
-    fish
-    bash
-    starship
-    git
-    neovim
-    stow
-    curl
-    wget
-    corretto21
+  # Default stow package list
+  dotfilesStowPackages = [
+    "fish"
+    "nvim"
+    "starship"
+    "ghostty"
   ];
+
+  # IMPORTANT: Define baseDevShellPackages as a simple list with explicit package references
+  baseDevShellPackages = [
+    final.ghostty
+    final.fish
+    final.bash
+    final.starship
+    final.git
+    final.neovim
+    final.stow
+    final.curl
+    final.wget
+    final.corretto21
+  ];
+
+  # Bundled environments for profile installation
+  terminal-tools = prev.buildEnv {
+    name = "terminal-tools";
+    paths = [
+      final.ghostty
+      final.fish
+      final.bash
+      final.starship
+      final.git
+      final.neovim
+      final.stow
+    ];
+    pathsToLink = [ "/bin" "/share" "/lib" "/Applications" ];
+  };
+
+  development-tools = prev.buildEnv {
+    name = "development-tools";
+    paths = final.baseDevShellPackages;
+    pathsToLink = [ "/bin" "/share" "/lib" "/Applications" ];
+  };
+
+  # Legacy aliases
+  base = final.terminal-tools;
+  base-devshell = final.development-tools;
 
   # Cross-platform desktop integration script
   desktop-integration = prev.writeShellScriptBin "setup-nix-desktop" ''
@@ -28,10 +59,8 @@ final: prev: {
       Linux*)
         echo "📋 Detected Linux - setting up XDG desktop integration"
         
-        # Ensure directories exist
         mkdir -p ~/.local/share/applications ~/.local/share/icons
         
-        # Symlink desktop files
         if [ -d ~/.nix-profile/share/applications ]; then
           for app in ~/.nix-profile/share/applications/*.desktop; do
             if [ -f "$app" ]; then
@@ -41,7 +70,6 @@ final: prev: {
           done
         fi
         
-        # Symlink icons
         if [ -d ~/.nix-profile/share/icons ]; then
           for icon_dir in ~/.nix-profile/share/icons/*; do
             if [ -d "$icon_dir" ]; then
@@ -52,13 +80,11 @@ final: prev: {
           done
         fi
         
-        # Update desktop database
         if command -v update-desktop-database >/dev/null 2>&1; then
           update-desktop-database ~/.local/share/applications 2>/dev/null || true
           echo "  ✓ Updated desktop database"
         fi
         
-        # Set XDG_DATA_DIRS for current session
         export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
         
         echo "✅ Linux desktop integration complete!"
@@ -74,171 +100,119 @@ final: prev: {
     esac
   '';
 
-  # Host OS terminal environment
-  base = prev.buildEnv {
-    name = "host-terminal-environment";
-    paths = final.hostOSPackages;
-    pathsToLink = [ "/bin" "/share" "/lib" "/Applications" ];
-  };
-
-  # Base development shell environment
-  base-devshell = prev.buildEnv {
-    name = "base-devshell-environment";
-    paths = final.baseDevShellPackages;
-    pathsToLink = [ "/bin" "/share" "/lib" ];
-  };
-
-  # Base shell creation function with Fish as default and universal env vars
-  mkBaseDevShell = { 
-    extraPackages ? [], 
-    extraShellHook ? "", 
-    useBash ? false  # Changed: now useBash instead of useFish, Fish is default
-  }: 
+  # Base shell creation function
+  mkBaseDevShell = {
+    extraPackages ? [],
+    extraShellHook ? "",
+    useBash ? false
+  }:
     let
-      # Universal environment variables (automatically exported by mkShell)
       commonEnvVars = {
         JAVA_HOME = "${final.corretto21}";
         EDITOR = "nvim";
         TERM = "xterm-256color";
-      } // (if builtins.pathExists "${dotfiles}/starship.toml" 
-           then { STARSHIP_CONFIG = "${dotfiles}/starship.toml"; }
-           else {});
-      
-      # Common informational output
+      };
+
+      stowApply = ''
+        if command -v stow >/dev/null 2>&1; then
+          DOTFILES="${dotfiles}"
+          if [ -d "$DOTFILES" ]; then
+            echo "🔗 Stowing from: $DOTFILES -> $HOME"
+            cd "$DOTFILES"
+            for pkg in ${builtins.concatStringsSep " " final.dotfilesStowPackages}; do
+              if [ -d "$pkg" ]; then
+                stow --verbose=1 --restow --no-folding --target "$HOME" "$pkg" || true
+                echo "  ✓ stowed $pkg"
+              fi
+            done
+          fi
+        else
+          echo "⚠️ GNU Stow not found; ensure it's included in baseDevShellPackages"
+        fi
+      '';
+
       commonInfo = ''
         echo "🖥️ Development environment loaded"
         echo "☕ Java: $(java -version 2>&1 | head -n1)"
         echo "📦 Editor: $EDITOR"
-        echo "⭐ Starship config: ''${STARSHIP_CONFIG:-default}"
         echo "💡 Platform: ${final.system}"
         echo "🔧 Run 'setup-nix-desktop' for GUI app integration"
         echo ""
       '';
-      
-      # Bash/Zsh specific setup (fallback)
+
       bashSetup = ''
         ${commonInfo}
         echo "🚀 Running in Bash/Zsh mode"
         echo "💡 To use Fish (recommended): 'fish'"
         echo ""
-        
-        # Set XDG_DATA_DIRS for Linux desktop integration
         case "$(uname -s)" in
           Linux*)
             export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
             ;;
         esac
-        
-        # Initialize Starship for bash/zsh
         if [ -n "$BASH_VERSION" ]; then
           eval "$(starship init bash)"
         elif [ -n "$ZSH_VERSION" ]; then
           eval "$(starship init zsh)"
         else
-          eval "$(starship init bash)"  # fallback
+          eval "$(starship init bash)"
         fi
       '';
-      
-      # Fish specific setup (default)
+
       fishSetup = ''
         ${commonInfo}
         echo "🐠 Preparing Fish shell as default..."
-        
-        # Set XDG_DATA_DIRS for Linux desktop integration
         case "$(uname -s)" in
           Linux*)
             export XDG_DATA_DIRS="$HOME/.nix-profile/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
             ;;
         esac
-        
-        # Create fish configuration directory
-        mkdir -p ~/.config/fish/conf.d/
-        
-        # Create fish devshell config that inherits environment variables
-        cat > ~/.config/fish/conf.d/nix-devshell.fish << 'EOF'
-        # Auto-generated nix devshell config for Fish
-        # Environment variables are automatically inherited from mkShell
-        
-        # Set XDG_DATA_DIRS for Linux desktop integration
-        switch (uname -s)
-          case Linux
-            set -gx XDG_DATA_DIRS "$HOME/.nix-profile/share:$XDG_DATA_DIRS"
-        end
-        
-        # Initialize starship prompt
-        if command -v starship > /dev/null
-          starship init fish | source
-        end
-        
-        # Custom fish greeting for devshell
-        function fish_greeting
-          echo "🐠 Fish development shell ready!"
-        end
-        EOF
-        
-        # Also ensure fish configuration loads properly
-        touch ~/.config/fish/config.fish
       '';
-      
-    in if useBash then
-      # Bash mode (fallback)
-      prev.mkShell (commonEnvVars // {
-        buildInputs = final.baseDevShellPackages ++ extraPackages;
-        shellHook = bashSetup + extraShellHook + ''
-          echo "💡 Switch to Fish anytime: 'fish'"
-        '';
-      })
-    else
-      # Fish mode (default)
-      prev.mkShell (commonEnvVars // {
-        buildInputs = final.baseDevShellPackages ++ extraPackages;
-        shellHook = fishSetup + extraShellHook + ''
-          echo "🐠 Starting Fish shell..."
-          exec fish
-        '';
-      });
+    in
+    prev.mkShell (commonEnvVars // {
+      buildInputs = final.baseDevShellPackages ++ extraPackages;
+      shellHook = (if useBash then bashSetup else fishSetup) + stowApply + extraShellHook + (if useBash then ''
+        echo "💡 Switch to Fish anytime: 'fish'"
+      '' else ''
+        echo "🐠 Starting Fish shell..."
+        exec fish
+      '');
+    });
 
   # Convenience functions
   mkBaseFishDevShell = { extraPackages ? [], extraShellHook ? "" }:
-    final.mkBaseDevShell { inherit extraPackages extraShellHook; }; # Fish is now default
+    final.mkBaseDevShell { inherit extraPackages extraShellHook; };
 
   mkBaseBashDevShell = { extraPackages ? [], extraShellHook ? "" }:
     final.mkBaseDevShell { inherit extraPackages extraShellHook; useBash = true; };
 
-  # Helper to set fish as system default (for permanent setup)
+  # Helper scripts
   setup-fish-default = prev.writeShellScriptBin "setup-fish-default" ''
     echo "🐠 Setting up Fish as system default shell..."
     
-    # Add fish to /etc/shells if not already there
     if ! grep -q "$(which fish)" /etc/shells 2>/dev/null; then
       echo "Adding fish to /etc/shells (requires sudo)"
       echo "$(which fish)" | sudo tee -a /etc/shells
     fi
     
-    # Change user's default shell to fish
     echo "Setting fish as default shell for $USER (requires password)"
     chsh -s "$(which fish)"
     
-    # Set up permanent starship configuration
-    mkdir -p ~/.config/fish/conf.d/
-    
-    cat > ~/.config/fish/conf.d/starship.fish << 'EOF'
-    # Permanent Starship configuration for Fish
-    if command -v starship > /dev/null
-      starship init fish | source
-    end
-    EOF
-    
-    # Set up environment variables permanently
-    echo "# Permanent environment variables" >> ~/.config/fish/config.fish
-    echo "set -gx EDITOR nvim" >> ~/.config/fish/config.fish
-    echo "set -gx TERM xterm-256color" >> ~/.config/fish/config.fish
-    
-    if [ -f "${dotfiles}/starship.toml" ]; then
-      echo "set -gx STARSHIP_CONFIG ${dotfiles}/starship.toml" >> ~/.config/fish/config.fish
-    fi
-    
     echo "✅ Fish configured as system default!"
     echo "💡 Restart your terminal or run: exec fish"
+  '';
+
+  dotfiles-stow = prev.writeShellScriptBin "dotfiles-stow" ''
+    set -e
+    DOTFILES="${dotfiles}"
+    echo "🔗 Stowing from: $DOTFILES -> $HOME"
+    cd "$DOTFILES"
+    for pkg in ${builtins.concatStringsSep " " final.dotfilesStowPackages}; do
+      if [ -d "$pkg" ]; then
+        stow --verbose=1 --restow --no-folding --target "$HOME" "$pkg"
+        echo "  ✓ stowed $pkg"
+      fi
+    done
+    echo "✅ Done"
   '';
 }

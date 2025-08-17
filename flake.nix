@@ -7,8 +7,9 @@
     ghostty = {
       url = "github:ghostty-org/ghostty?ref=v1.1.1";
     };
+    # Dotfiles fetched from GitHub as a non-flake; downstream can override
     dotfiles = {
-      url = "path:./dotfiles";
+      url = "github:thoughtoinnovate/dotfiles?ref=main";
       flake = false;
     };
   };
@@ -19,30 +20,52 @@
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
-          overlays = [ (import ./overlays/base.nix { inherit ghostty dotfiles; }) ];
+          overlays = [
+            (import ./overlays/base.nix { inherit ghostty dotfiles; })
+            (import ./overlays/development.nix)  # ADD THIS LINE
+          ];
         };
       in {
         packages = {
+          # Individual packages
           ghostty = pkgs.ghostty;
-          base = pkgs.base;
-          base-devshell = pkgs.base-devshell;
+          
+          # Bundled environments
+          terminal-tools = pkgs.terminal-tools;        # Basic terminal tools
+          development-tools = pkgs.development-tools;  # Base development tools
+          full-development = pkgs.full-development-environment; # Everything including IDEs
+          
+          # Utility scripts
           desktop-integration = pkgs.desktop-integration;
-          setup-fish-default = pkgs.setup-fish-default;  # New helper
-          default = pkgs.base;
+          setup-fish-default = pkgs.setup-fish-default;
+          dotfiles-stow = pkgs.dotfiles-stow;
+          
+          # Legacy aliases
+          base = pkgs.terminal-tools;
+          base-devshell = pkgs.development-tools;
+          
+          # Default package
+          default = pkgs.development-tools;
         };
 
         devShells = {
-          # Fish is now the default shell
+          # Fish is the default interactive shell
           default = pkgs.mkBaseDevShell {};
-          
+
           # Explicit options
-          fish = pkgs.mkBaseFishDevShell {};  # Same as default now
-          bash = pkgs.mkBaseBashDevShell {};  # Fallback option
+          fish = pkgs.mkBaseFishDevShell {};
+          bash = pkgs.mkBaseBashDevShell {};
+          
+          # Java-specific shells
+          java11 = pkgs.mkJava11DevShell {};
+          java17 = pkgs.mkJava17DevShell {};
+          java21 = pkgs.mkJava21DevShell {};
         };
       }
     ) // {
       overlays = {
         default = import ./overlays/base.nix { inherit ghostty dotfiles; };
+        development = import ./overlays/development.nix;
       };
     };
 }
