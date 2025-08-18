@@ -26,34 +26,21 @@
         };
       in {
         packages = {
-          # Individual packages
           ghostty = pkgs.ghostty;
-          
-          # Bundled environments
           terminal-tools = pkgs.terminal-tools;
           development-tools = pkgs.development-tools;
           full-development = pkgs.full-development-environment;
-          
-          # Utility scripts
           desktop-integration = pkgs.desktop-integration;
           setup-fish-default = pkgs.setup-fish-default;
           dotfiles-stow = pkgs.dotfiles-stow;
-          
-          # Legacy aliases
           base = pkgs.terminal-tools;
           base-devshell = pkgs.development-tools;
-          
-          # Default package
           default = pkgs.development-tools;
         };
-
         devShells = {
-          # Standard shells (no force flag needed anymore)
           default = pkgs.mkBaseDevShell {};
           fish = pkgs.mkBaseFishDevShell {};
           bash = pkgs.mkBaseBashDevShell {};
-          
-          # Java-specific shells
           java11 = pkgs.mkJava11DevShell {};
           java17 = pkgs.mkJava17DevShell {};
           java21 = pkgs.mkJava21DevShell {};
