@@ -7,7 +7,7 @@ final: prev: {
   ) [ "fish" "nvim" "starship" "ghostty" ];
 
   # Base development packages
-  baseDevShellPackages = [
+  basePackages = [
     final.fish
     final.nushell
     final.starship
@@ -36,7 +36,7 @@ final: prev: {
 
   development-tools = prev.buildEnv {
     name = "development-tools";
-    paths = final.baseDevShellPackages;
+    paths = final.basePackages;
     pathsToLink = [ "/bin" "/share" "/lib" "/Applications" ];
   };
 
@@ -117,7 +117,7 @@ final: prev: {
 
     in
     prev.mkShell (commonEnvVars // {
-      buildInputs = final.baseDevShellPackages ++ extraPackages;
+      buildInputs = final.basePackages ++ extraPackages;
       shellHook = stowSetup + shellSetup + extraShellHook + (if useBash then ''
         echo "💡 Switch to Fish: 'fish'"
       '' else ''

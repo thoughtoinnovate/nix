@@ -5,13 +5,12 @@ final: prev: {
     minikube
     vscode
     gradle
-    dbeaver-bin
   ];
 
   # Helper: Replace corretto21 with any other Java version as needed
   fullDevBasePackages = builtins.map (pkg:
     if pkg == final.corretto21 then final.corretto17 else pkg
-  ) final.baseDevShellPackages;
+  ) final.basePackages;
 
   # This environment will use Java 17, not 21 (can change to corretto11/21 as needed)
   full-development-environment = prev.buildEnv {
