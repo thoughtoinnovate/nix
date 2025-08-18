@@ -1,9 +1,6 @@
-{ ghostty, dotfiles }:
+{ dotfiles }:
 
 final: prev: {
-  # Expose ghostty as a package
-  ghostty = ghostty.packages.${final.system}.default;
-
   # Only stow packages that actually exist
   dotfilesStowPackages = builtins.filter (pkg: 
     builtins.pathExists "${dotfiles}/${pkg}"
@@ -11,9 +8,8 @@ final: prev: {
 
   # Base development packages
   baseDevShellPackages = [
-    final.ghostty
     final.fish
-    final.bash
+    final.nushell
     final.starship
     final.git
     final.neovim

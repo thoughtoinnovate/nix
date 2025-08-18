@@ -5,6 +5,7 @@ final: prev: {
     minikube
     vscode
     gradle
+    dbeaver-bin
   ];
 
   # Helper: Replace corretto21 with any other Java version as needed

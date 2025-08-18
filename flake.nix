@@ -4,29 +4,25 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    ghostty = {
-      url = "github:ghostty-org/ghostty?ref=v1.1.1";
-    };
     dotfiles = {
       url = "github:thoughtoinnovate/dotfiles?ref=main";
       flake = false;
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ghostty, dotfiles }:
+  outputs = { self, nixpkgs, flake-utils, dotfiles }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
           overlays = [
-            (import ./overlays/base.nix { inherit ghostty dotfiles; })
+            (import ./overlays/base.nix { inherit dotfiles; })
             (import ./overlays/development.nix)
           ];
         };
       in {
         packages = {
-          ghostty = pkgs.ghostty;
           terminal-tools = pkgs.terminal-tools;
           development-tools = pkgs.development-tools;
           full-development = pkgs.full-development-environment;
@@ -48,7 +44,7 @@
       }
     ) // {
       overlays = {
-        default = import ./overlays/base.nix { inherit ghostty dotfiles; };
+        default = import ./overlays/base.nix { inherit dotfiles; };
         development = import ./overlays/development.nix;
       };
     };
