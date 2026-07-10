@@ -1,51 +1,107 @@
 {
-  description = "Reusable base terminal and development overlays for Nix flakes";
+  description = "Reusable cross-platform terminal and development configuration";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     flake-utils.url = "github:numtide/flake-utils";
-    dotfiles = {
-      url = "github:thoughtoinnovate/dotfiles?ref=main";
-      flake = false;
+
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin";
+      inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, dotfiles }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-          overlays = [
-            (import ./overlays/base.nix { inherit dotfiles; })
-            (import ./overlays/development.nix)
-          ];
-        };
-      in {
-        packages = {
-          terminal-tools = pkgs.terminal-tools;
-          development-tools = pkgs.development-tools;
-          full-development = pkgs.full-development-environment;
-          desktop-integration = pkgs.desktop-integration;
-          setup-fish-default = pkgs.setup-fish-default;
-          dotfiles-stow = pkgs.dotfiles-stow;
-          base = pkgs.terminal-tools;
-          base-devshell = pkgs.development-tools;
-          default = pkgs.development-tools;
-        };
-        devShells = {
-          default = pkgs.mkBaseDevShell {};
-          fish = pkgs.mkBaseFishDevShell {};
-          bash = pkgs.mkBaseBashDevShell {};
-          java11 = pkgs.mkJava11DevShell {};
-          java17 = pkgs.mkJava17DevShell {};
-          java21 = pkgs.mkJava21DevShell {};
-        };
-      }
-    ) // {
+  outputs =
+    inputs@{
+      self,
+      nixpkgs,
+      flake-utils,
+      ...
+    }:
+    let
+      baseOverlay = import ./overlays/base.nix;
+      developmentOverlay = import ./overlays/development.nix;
+    in
+    flake-utils.lib.eachSystem
+      [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ]
+      (
+        system:
+        let
+          pkgs = import nixpkgs {
+            inherit system;
+            overlays = [
+              baseOverlay
+              developmentOverlay
+            ];
+            config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
+          };
+        in
+        {
+          packages = {
+            inherit (pkgs)
+              terminal-tools
+              development-tools
+              full-development-environment
+              ;
+
+            base = pkgs.terminal-tools;
+            base-devshell = pkgs.development-tools;
+            full-development = pkgs.full-development-environment;
+            default = pkgs.development-tools;
+          };
+
+          devShells = {
+            base = pkgs.mkBaseDevShell { };
+            default = pkgs.mkJava21DevShell { };
+            bash = pkgs.mkBaseBashDevShell { };
+            zsh = pkgs.mkBaseZshDevShell { };
+            java11 = pkgs.mkJava11DevShell { };
+            java17 = pkgs.mkJava17DevShell { };
+            java21 = pkgs.mkJava21DevShell { };
+          };
+
+          formatter = pkgs.nixfmt;
+
+          checks.overlay-evaluation =
+            assert pkgs ? terminal-tools;
+            assert pkgs ? development-tools;
+            assert pkgs ? mkJava21DevShell;
+            pkgs.runCommand "overlay-evaluation" { } ''
+              touch $out
+            '';
+        }
+      )
+    // {
       overlays = {
-        default = import ./overlays/base.nix { inherit dotfiles; };
-        development = import ./overlays/development.nix;
+        default = baseOverlay;
+        base = baseOverlay;
+        development = developmentOverlay;
+      };
+
+      homeModules = {
+        default = import ./modules/home;
+        base = import ./modules/home/base.nix;
+        development = import ./modules/home/development.nix;
+      };
+
+      darwinModules = {
+        default = import ./modules/darwin;
+        base = import ./modules/darwin;
+      };
+
+      templates.default = {
+        path = ./templates/consumer;
+        description = "Consumer flake for the thoughtoinnovate Nix base";
       };
     };
 }
