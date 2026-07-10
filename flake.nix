@@ -15,6 +15,11 @@
       url = "github:nix-darwin/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    dotfiles = {
+      url = "github:thoughtoinnovate/dotfiles";
+      flake = false;
+    };
   };
 
   outputs =
@@ -45,6 +50,43 @@
             ];
             config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
           };
+          homeTest =
+            shell: development:
+            inputs.home-manager.lib.homeManagerConfiguration {
+              inherit pkgs;
+              modules = [
+                self.homeModules.default
+                {
+                  home = {
+                    username = "test-user";
+                    homeDirectory = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/test-user" else "/home/test-user";
+                    stateVersion = "26.05";
+                  };
+                  thoughtoinnovate = {
+                    base = {
+                      enable = true;
+                      shells = [ shell ];
+                    };
+                    development.enable = development;
+                  };
+                }
+              ];
+            };
+          homeTestDerivations =
+            builtins.concatMap
+              (
+                shell:
+                map (development: (homeTest shell development).activationPackage.drvPath) [
+                  false
+                  true
+                ]
+              )
+              [
+                "bash"
+                "fish"
+                "nushell"
+                "zsh"
+              ];
         in
         {
           packages = {
@@ -52,12 +94,39 @@
               terminal-tools
               development-tools
               full-development-environment
+              neovim
+              starship
+              stow
               ;
 
             base = pkgs.terminal-tools;
             base-devshell = pkgs.development-tools;
             full-development = pkgs.full-development-environment;
             default = pkgs.development-tools;
+          };
+
+          apps = {
+            setup = {
+              type = "app";
+              program = "${
+                pkgs.writeShellApplication {
+                  name = "thoughtoinnovate-setup";
+                  runtimeInputs = with pkgs; [
+                    coreutils
+                    curl
+                    git
+                    gnused
+                    jq
+                    stow
+                  ];
+                  text = ''
+                    exec ${pkgs.bash}/bin/bash ${./install.sh} "$@"
+                  '';
+                }
+              }/bin/thoughtoinnovate-setup";
+              meta.description = "Bootstrap a standalone or custom thoughtoinnovate system profile";
+            };
+            default = self.apps.${system}.setup;
           };
 
           devShells = {
@@ -72,13 +141,21 @@
 
           formatter = pkgs.nixfmt;
 
-          checks.overlay-evaluation =
-            assert pkgs ? terminal-tools;
-            assert pkgs ? development-tools;
-            assert pkgs ? mkJava21DevShell;
-            pkgs.runCommand "overlay-evaluation" { } ''
-              touch $out
-            '';
+          checks = {
+            overlay-evaluation =
+              assert pkgs ? terminal-tools;
+              assert pkgs ? development-tools;
+              assert pkgs ? mkJava21DevShell;
+              pkgs.runCommand "overlay-evaluation" { } ''
+                touch $out
+              '';
+
+            home-module-evaluation = builtins.deepSeq homeTestDerivations (
+              pkgs.runCommand "home-module-evaluation" { } ''
+                touch $out
+              ''
+            );
+          };
         }
       )
     // {
@@ -99,9 +176,21 @@
         base = import ./modules/darwin;
       };
 
+      lib = {
+        dotfiles = {
+          repository = "https://github.com/thoughtoinnovate/dotfiles.git";
+          rev = inputs.dotfiles.rev;
+        };
+      };
+
       templates.default = {
         path = ./templates/consumer;
         description = "Consumer flake for the thoughtoinnovate Nix base";
+      };
+
+      templates.profile = {
+        path = ./templates/profile;
+        description = "Extensible personal or work profile using Nix and Stow";
       };
     };
 }

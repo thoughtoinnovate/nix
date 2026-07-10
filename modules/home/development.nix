@@ -14,10 +14,6 @@ in
 
   config = lib.mkIf cfg.enable {
     thoughtoinnovate.base.enable = lib.mkDefault true;
-    thoughtoinnovate.base.shellAliases = lib.mkDefault {
-      lg = "lazygit";
-      vim = "nvim";
-    };
 
     nixpkgs = {
       overlays = [ (import ../../overlays/development.nix) ];

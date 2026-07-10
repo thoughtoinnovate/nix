@@ -5,24 +5,19 @@
     nix-base.url = "github:thoughtoinnovate/nix";
 
     nixpkgs.follows = "nix-base/nixpkgs";
-
-    home-manager = {
-      url = "github:nix-community/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   outputs =
     {
       nix-base,
       nixpkgs,
-      home-manager,
       ...
     }:
     let
       # Change these values for the target user and machine.
       system = "x86_64-linux";
       username = "change-me";
+      home-manager = nix-base.inputs.home-manager;
     in
     {
       homeConfigurations.${username} = home-manager.lib.homeManagerConfiguration {

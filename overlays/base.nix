@@ -4,18 +4,24 @@ let
   isLinux = final.stdenv.hostPlatform.isLinux;
   isDarwin = final.stdenv.hostPlatform.isDarwin;
 
-  commonTerminalPackages = with final; [
-    bashInteractive
+  commonToolPackages = with final; [
     curl
-    fish
     git
     neovim
-    nushell
+    nerd-fonts.fira-code
     starship
     stow
     wget
-    zsh
   ];
+
+  shellPackages = with final; {
+    bash = bashInteractive;
+    fish = fish;
+    nushell = nushell;
+    zsh = zsh;
+  };
+
+  commonTerminalPackages = commonToolPackages ++ builtins.attrValues shellPackages;
 
   platformTerminalPackages = lib.optionals isLinux [ final.ghostty ];
   baseJdk = if isLinux then final.corretto21 else final.jdk21;
@@ -27,7 +33,12 @@ let
   ++ lib.optionals isDarwin [ "/Applications" ];
 in
 {
-  inherit commonTerminalPackages platformTerminalPackages;
+  inherit
+    commonTerminalPackages
+    commonToolPackages
+    platformTerminalPackages
+    shellPackages
+    ;
 
   basePackagesWithoutJava = commonTerminalPackages ++ platformTerminalPackages;
   inherit baseJdk;

@@ -11,101 +11,44 @@ in
   options.thoughtoinnovate.base = {
     enable = lib.mkEnableOption "the thoughtoinnovate base user environment";
 
-    enableFish = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether Home Manager should configure Fish in addition to Bash and Zsh.";
-    };
-
-    enableGhostty = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-      description = "Whether Home Manager should manage Ghostty and its shell integration.";
-    };
-
-    shellAliases = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
-      default = {
-        vim = "nvim";
-      };
-      description = "Shell aliases shared by Bash, Zsh, and Fish.";
-    };
-
-    sessionVariables = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.oneOf [
-          lib.types.str
-          lib.types.int
-          lib.types.bool
+    shells = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.enum [
+          "bash"
+          "fish"
+          "nushell"
+          "zsh"
         ]
       );
-      default = {
-        EDITOR = "nvim";
-      };
-      description = "Non-secret environment variables shared across supported shells.";
+      default = [ "zsh" ];
+      description = "Shells to install and configure. The bootstrap script normally selects one.";
     };
 
-    shellInit = lib.mkOption {
-      type = lib.types.lines;
-      default = "";
-      description = ''
-        Optional shell-neutral initialization shared by Bash and Zsh.
-        Do not put credentials or secret values here because Home Manager
-        configuration is copied to the Nix store.
-      '';
-    };
-
-    ghosttySettings = lib.mkOption {
-      type = lib.types.attrs;
-      default = { };
-      description = "Settings written to the Ghostty configuration file.";
-    };
   };
 
   config = lib.mkIf cfg.enable {
     nixpkgs.overlays = [ (import ../../overlays/base.nix) ];
 
-    home.packages = [ pkgs.terminal-tools ];
-    home.sessionVariables = cfg.sessionVariables;
+    assertions = [
+      {
+        assertion = cfg.shells != [ ];
+        message = "thoughtoinnovate.base.shells must contain at least one shell.";
+      }
+    ];
 
-    programs.bash = {
-      enable = true;
-      shellAliases = cfg.shellAliases;
-      initExtra = cfg.shellInit;
-    };
+    home.packages =
+      (with pkgs; [
+        curl
+        git
+        neovim
+        nerd-fonts.fira-code
+        starship
+        stow
+        wget
+      ])
+      ++ map (shell: pkgs.shellPackages.${shell}) cfg.shells
+      ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.ghostty ];
 
-    programs.zsh = {
-      enable = true;
-      shellAliases = cfg.shellAliases;
-      initContent = cfg.shellInit;
-    };
-
-    programs.fish = lib.mkIf cfg.enableFish {
-      enable = true;
-      shellAliases = cfg.shellAliases;
-    };
-
-    programs.git.enable = true;
-
-    programs.neovim = {
-      enable = true;
-      defaultEditor = true;
-    };
-
-    programs.starship = {
-      enable = true;
-      enableBashIntegration = true;
-      enableFishIntegration = cfg.enableFish;
-      enableZshIntegration = true;
-    };
-
-    programs.ghostty = lib.mkIf cfg.enableGhostty {
-      enable = true;
-      package = if pkgs.stdenv.hostPlatform.isLinux then pkgs.ghostty else null;
-      settings = cfg.ghosttySettings;
-      enableBashIntegration = true;
-      enableFishIntegration = cfg.enableFish;
-      enableZshIntegration = true;
-    };
+    fonts.fontconfig.enable = pkgs.stdenv.hostPlatform.isLinux;
   };
 }

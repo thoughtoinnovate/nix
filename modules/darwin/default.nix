@@ -1,7 +1,6 @@
 {
   config,
   lib,
-  pkgs,
   ...
 }:
 let
@@ -45,14 +44,6 @@ in
     ];
 
     system.primaryUser = lib.mkIf (cfg.primaryUser != null) cfg.primaryUser;
-
-    programs.zsh.enable = true;
-
-    environment.shells = with pkgs; [
-      bashInteractive
-      fish
-      zsh
-    ];
 
     homebrew = lib.mkIf cfg.manageHomebrew {
       enable = true;
