@@ -16,10 +16,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    dotfiles = {
-      url = "github:thoughtoinnovate/dotfiles";
-      flake = false;
-    };
   };
 
   outputs =
@@ -117,9 +113,11 @@
                     git
                     gnused
                     jq
+                    rsync
                     stow
                   ];
                   text = ''
+                    export THOUGHTOINNOVATE_DOTFILE_COMPOSER=${./lib/compose-dotfiles.sh}
                     exec ${pkgs.bash}/bin/bash ${./install.sh} "$@"
                   '';
                 }
@@ -155,6 +153,38 @@
                 touch $out
               ''
             );
+
+            dotfile-components =
+              pkgs.runCommand "dotfile-components"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    coreutils
+                    git
+                    jq
+                    rsync
+                    stow
+                  ];
+                }
+                ''
+                    bash ${./tests/test-profile-dotfiles.sh} \
+                      ${./dotfiles} \
+                      ${./lib/compose-dotfiles.sh}
+                  touch $out
+                '';
+
+            public-dotfile-sanitization =
+              pkgs.runCommand "public-dotfile-sanitization"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    coreutils
+                    gnugrep
+                    ripgrep
+                  ];
+                }
+                ''
+                  bash ${./tests/test-public-dotfiles.sh} ${./dotfiles}
+                  touch $out
+                '';
           };
         }
       )
@@ -176,12 +206,7 @@
         base = import ./modules/darwin;
       };
 
-      lib = {
-        dotfiles = {
-          repository = "https://github.com/thoughtoinnovate/dotfiles.git";
-          rev = inputs.dotfiles.rev;
-        };
-      };
+      lib.dotfiles.path = ./dotfiles;
 
       templates.default = {
         path = ./templates/consumer;

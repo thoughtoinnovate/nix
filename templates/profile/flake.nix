@@ -4,12 +4,6 @@
   inputs = {
     nix-base.url = "github:thoughtoinnovate/nix";
 
-    dotfiles-base = {
-      url = "github:thoughtoinnovate/dotfiles";
-      flake = false;
-    };
-
-    nix-base.inputs.dotfiles.follows = "dotfiles-base";
     nixpkgs.follows = "nix-base/nixpkgs";
   };
 
@@ -18,7 +12,6 @@
       self,
       nix-base,
       nixpkgs,
-      dotfiles-base,
       ...
     }:
     let
@@ -34,7 +27,7 @@
       homeModules.default = import ./home.nix;
 
       lib.setup = {
-        schemaVersion = 1;
+        schemaVersion = 2;
         defaults = {
           shell = "zsh";
           profile = "development";
@@ -42,19 +35,38 @@
         dotfiles.layers = [
           {
             name = "base";
-            source = "${dotfiles-base}";
-            packages = [
-              "common"
-              "starship"
-              "@shell"
-              "ghostty"
-              "nvim"
-            ];
+            source = {
+              kind = "nix";
+              path = "${nix-base.outPath}/dotfiles";
+            };
+            entries =
+              map
+                (package: {
+                  from = package;
+                  to = ".";
+                  mode = "merge";
+                })
+                [
+                  "common"
+                  "starship"
+                  "@shell"
+                  "ghostty"
+                  "nvim"
+                ];
           }
           {
             name = "custom";
-            source = "${self.outPath}/dotfiles";
-            packages = [ "custom" ];
+            source = {
+              kind = "nix";
+              path = "${self.outPath}/dotfiles";
+            };
+            entries = [
+              {
+                from = "custom";
+                to = ".";
+                mode = "merge";
+              }
+            ];
           }
         ];
       };

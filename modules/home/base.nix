@@ -37,15 +37,7 @@ in
     ];
 
     home.packages =
-      (with pkgs; [
-        curl
-        git
-        neovim
-        nerd-fonts.fira-code
-        starship
-        stow
-        wget
-      ])
+      pkgs.commonToolPackages
       ++ map (shell: pkgs.shellPackages.${shell}) cfg.shells
       ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.ghostty ];
 

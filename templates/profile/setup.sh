@@ -4,6 +4,16 @@ set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
+UPDATE_INPUTS=false
+SETUP_ARGS=()
+
+for argument in "$@"; do
+  if [[ "$argument" == "--update" ]]; then
+    UPDATE_INPUTS=true
+  else
+    SETUP_ARGS+=("$argument")
+  fi
+done
 
 load_nix_environment() {
   local candidate
@@ -43,5 +53,10 @@ command -v nix >/dev/null 2>&1 || {
   exit 1
 }
 
+if "$UPDATE_INPUTS"; then
+  nix "${NIX_FLAGS[@]}" flake update --flake "$ROOT"
+  printf 'Updated profile inputs. Review and commit %s/flake.lock.\n' "$ROOT"
+fi
+
 exec nix "${NIX_FLAGS[@]}" run "path:$ROOT#setup" -- \
-  --config-url "path:$ROOT" "$@"
+  --config-url "path:$ROOT" "${SETUP_ARGS[@]}"

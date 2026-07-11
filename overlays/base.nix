@@ -4,15 +4,39 @@ let
   isLinux = final.stdenv.hostPlatform.isLinux;
   isDarwin = final.stdenv.hostPlatform.isDarwin;
 
-  commonToolPackages = with final; [
-    curl
-    git
-    neovim
-    nerd-fonts.fira-code
-    starship
-    stow
-    wget
+  neovimPython = final.python3.withPackages (pythonPackages: [
+    pythonPackages.cairosvg
+    pythonPackages.debugpy
+    pythonPackages.ipykernel
+    pythonPackages."jupyter-client"
+    pythonPackages.jupytext
+    pythonPackages.notebook
+    pythonPackages.pillow
+    pythonPackages.pynvim
+  ]);
+
+  neovimCorePackages = with final; [
+    clang
+    fd
+    gnumake
+    nodejs
+    neovimPython
+    ripgrep
+    unzip
   ];
+
+  commonToolPackages =
+    with final;
+    [
+      curl
+      git
+      neovim
+      nerd-fonts.fira-code
+      starship
+      stow
+      wget
+    ]
+    ++ neovimCorePackages;
 
   shellPackages = with final; {
     bash = bashInteractive;
@@ -36,6 +60,8 @@ in
   inherit
     commonTerminalPackages
     commonToolPackages
+    neovimCorePackages
+    neovimPython
     platformTerminalPackages
     shellPackages
     ;

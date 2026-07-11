@@ -21,13 +21,15 @@ Homebrew taps, and substituter keys before merging updates. Downstream private
 repositories should not publish build outputs containing internal material to
 public binary caches.
 
-The installer checks out the dotfiles revision from `flake.lock`, refuses a
-dirty checkout, and performs a Stow simulation before linking. It never adopts
-or overwrites conflicting files. Home Manager packages and Homebrew casks are
-community distribution definitions; review their source and hashes rather than
-assuming vendor endorsement.
+The installer composes the bundled sanitized dotfile template and performs a
+Stow simulation before linking. It never adopts or overwrites conflicting
+files. Home Manager packages and Homebrew casks are community distribution
+definitions; review their source and hashes rather than assuming vendor
+endorsement.
 
-Profile flakes and their dotfiles are copied into the Nix store during
-evaluation. Never commit or reference secret values from a profile. The
+Profile flakes and Nix-backed components are copied into the Nix store during
+evaluation. Never commit or reference secret values from a profile. Schema 2
+private Git components are cloned outside the Nix store, but they still must
+contain private settings only—not passwords, tokens, or keys. The
 provider-neutral bootstrap uses ordinary Git authentication already configured
 on the machine and does not persist credentials itself.

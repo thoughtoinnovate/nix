@@ -13,17 +13,19 @@ modules. Credentials and proprietary source code do not belong here.
 ## Profiles
 
 - `base`: Bash, Fish, Zsh, Nushell, Git, Neovim, Starship, curl, wget, Stow,
-  FiraCode Nerd Font, Java 21, and Ghostty on Linux. Java uses Amazon Corretto
-  on Linux and OpenJDK on macOS.
+  FiraCode Nerd Font, Java 21, Ghostty on Linux, and Neovim essentials including
+  ripgrep, fd, Node.js, Python, unzip, make, and Clang. Java uses Amazon
+  Corretto on Linux and OpenJDK on macOS.
 - `development`: everything in `base`, plus Gradle, kubectl, minikube,
-  lazygit, VS Code, and Java 11/17/21 development shells.
+  lazygit, VS Code, Java 11/17/21 development shells, Go, Rust, common language
+  servers, Google Java Format, Jupyter, and ImageMagick.
 - `darwin`: nix-darwin integration and optional Homebrew installation of the
   Ghostty macOS application.
 
 Ghostty is installed from Nixpkgs on Linux. On macOS, the bootstrap uses the
 official Homebrew cask when Homebrew is available; the nix-darwin module can
-manage the same cask declaratively. Configuration always comes from the
-separate public dotfiles repository.
+manage the same cask declaratively. Default configuration comes from the
+sanitized dotfile template bundled in this repository.
 
 ## Test the base
 
@@ -44,6 +46,12 @@ Clone the repository and run the installer interactively:
 ./install.sh
 ```
 
+Interactive setup optionally creates a personal profile repository. It asks
+for a local profile directory and an optional GitHub or GitLab SSH remote, then
+generates an overrides-only `dotfiles/custom` tree. It initializes Git locally
+but never commits, pushes, or stores provider credentials. The generated Stow
+directory is internal and is not a user-facing choice.
+
 Or make the choices explicit:
 
 ```sh
@@ -60,9 +68,10 @@ The installer:
    when Nix is missing and after confirmation.
 5. Generates a local flake under
    `~/.config/thoughtoinnovate-nix` and activates it with Home Manager.
-6. Clones the exact dotfiles revision pinned by `flake.lock` into
-   `~/.dotfiles`, simulates Stow to detect conflicts, then links `common`, the
-   selected shell, Starship, Ghostty, and Neovim configuration.
+6. Copies the bundled dotfile template into a generated Stow tree, simulates
+   Stow to detect conflicts, then links `common`, the selected shell, Starship,
+   Ghostty, and Neovim. Profile setup additionally composes custom public or
+   private components.
 
 It is safe to rerun when both generated repositories are clean. It stops on
 dotfile conflicts or local changes and never uses Stow's `--adopt` option. It
@@ -73,9 +82,8 @@ Home Manager configuration. For testing an unpublished checkout, use:
 ./install.sh --base-url "path:$PWD" --shell fish --profile development
 ```
 
-Use `--dotfiles-url` or `--dotfiles-dir` to override dotfile checkout details.
 Add `--generate-only` to inspect and lock the generated flake without
-activating Home Manager, cloning dotfiles, or running Stow.
+activating Home Manager or running Stow.
 
 The private work repository can provide a small wrapper around this installer
 after it exports its `work` overlay and Home Manager module.
@@ -93,10 +101,10 @@ git init && git add . && git commit -m "Create system profile"
 ./setup.sh
 ```
 
-The generated repository pins this Nix base and the public dotfiles base, then
-adds `overlay.nix`, `home.nix`, and `dotfiles/custom` last. Change either input
-URL only when intentionally using a fork. One repository can represent a
-personal setup and another a work setup.
+The generated repository pins this Nix base, uses its bundled shell, terminal,
+and Neovim template, then adds `overlay.nix`, `home.nix`, and
+`dotfiles/custom` last. One repository can represent a personal setup and
+another a work setup.
 
 The profile works from GitHub, GitLab, self-hosted Git, SSH, HTTPS, or a local
 path. Users can clone it and run `./setup.sh`, or use the provider-neutral
@@ -111,11 +119,31 @@ bootstrap:
 Private repositories require Git authentication before bootstrap. The setup
 framework does not copy or manage SSH keys, tokens, or credentials.
 
+GUI applications launched from Finder, Spotlight, or a desktop menu generally
+do not source interactive shell files. Configure those applications with an
+explicit Nix executable path or wrapper instead of relying on `.zshrc` or an
+equivalent file. For example, an AWS-backed Claude Desktop MCP server can set
+`AWS_PROFILE` explicitly while the AWS SDK reads `~/.aws/config`, the local
+credentials file, or the AWS SSO cache. Keep AWS credentials and tokens in
+those local stores or a secret manager, never in a dotfile component.
+
 Profile defaults live in `lib.setup.defaults`; `--shell` and `--profile`
 override them. Dotfile layers are composed in their declared order before Stow
 links one generated tree. Later regular files override earlier files,
 directories merge, and file/directory type conflicts stop setup. The previous
 linked generation is restored if activation fails.
+
+Schema version 2 supports tool-specific components. Each ordered layer has a
+`nix`, `path`, or `git` source and one or more `{ from, to, mode }` entries.
+`merge` overlays files; `replace` clears a non-root target such as
+`.config/nvim` first. Private Git sources require an exact 40-character commit
+and are cloned outside the Nix store. This allows a work profile to retain all
+public dotfiles while replacing only Neovim or another tool from GitLab.
+
+`./setup.sh` reapplies locked versions. Profile owners use
+`./setup.sh --update` to refresh public inputs, review and commit `flake.lock`,
+and separately update exact private component SHAs. Consumers receive reviewed
+changes through Git pull or central bootstrap.
 
 ## Consume the overlays
 
@@ -149,11 +177,10 @@ Downstream work repositories should apply overlays in this order:
 base -> development -> work
 ```
 
-Use the same model for dotfiles. The public dotfiles repository owns common
-files; a separate personal or organization Git repository adds a `work` Stow
-package through the documented `conf.d`, Nushell autoload, and Neovim
-`local.lua` extension points. Stow uses `--no-folding`, which leaves parent
-directories available for multiple repositories to add non-conflicting files:
+Use the same model for dotfiles. This repository owns the sanitized common,
+shell, terminal, and editor defaults, while a personal or organization Git
+component merges or replaces selected targets. Manual
+multi-repository Stow remains available for additive, non-conflicting files:
 
 ```sh
 stow --dir="$HOME/.work-dotfiles" --target="$HOME" --no-folding work
@@ -191,7 +218,7 @@ Enable the development profile in a Home Manager configuration:
 The module installs only the shells selected through
 `thoughtoinnovate.base.shells`, plus common packages and fonts. Home Manager
 does not write shell, Starship, Ghostty, Git, or Neovim configuration; Stow is
-the sole owner of those files. Bash and Zsh both source a small portable common
+the final owner of the composed files. Bash and Zsh both source a portable common
 file rather than sourcing one shell's startup file from the other. Credential
 files are not loaded automatically.
 
@@ -224,11 +251,11 @@ activation but does not change the upstream source selected by Nixpkgs.
 
 ## Dotfiles and secrets
 
-The companion repository is `https://github.com/thoughtoinnovate/dotfiles`.
-Its revision is a non-flake input pinned in this repository's `flake.lock`.
-Public configuration must never contain credentials. Store secrets locally in
-`~/.secrets` or a secret manager and load them explicitly only on machines that
-need them.
+The bundled `dotfiles/` directory contains the complete sanitized default,
+including Neovim. It must remain free of usernames, machine-specific home
+paths, hostnames, credentials, and organization-only configuration. Store
+secrets locally in platform credential stores or a secret manager and load
+them explicitly only on machines that need them.
 
 ## macOS
 
@@ -264,5 +291,4 @@ applications.
 
 Compatibility package names such as `base`, `base-devshell`,
 `terminal-tools`, and `development-tools` remain available. The installer
-automates safe Stow linking, while the dotfiles repository owns persistent user
-configuration.
+automates safe Stow linking from public and private configuration components.

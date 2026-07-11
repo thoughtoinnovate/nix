@@ -7,8 +7,6 @@ SELECTED_SHELL=""
 BASE_URL="${NIX_BASE_URL:-github:thoughtoinnovate/nix}"
 CONFIG_URL="${NIX_CONFIG_URL:-}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/thoughtoinnovate-nix"
-DOTFILES_URL="${NIX_DOTFILES_URL:-https://github.com/thoughtoinnovate/dotfiles.git}"
-DOTFILES_DIR="${NIX_DOTFILES_DIR:-$HOME/.dotfiles}"
 ASSUME_YES=false
 ALLOW_NIX_INSTALL=true
 GENERATE_ONLY=false
@@ -32,8 +30,6 @@ Options:
   --base-url URL                 Base flake URL (default: github:thoughtoinnovate/nix)
   --config-url URL               User profile flake URL or local path
   --config-dir PATH              Generated Home Manager flake directory
-  --dotfiles-url URL             Dotfiles Git URL
-  --dotfiles-dir PATH            Dotfiles checkout (default: ~/.dotfiles)
   --yes                          Accept the Nix installation prompt
   --no-install-nix               Fail instead of installing Nix when it is missing
   --generate-only                Write and lock the local flake without activating it
@@ -77,16 +73,6 @@ while [[ $# -gt 0 ]]; do
     --config-dir)
       [[ $# -ge 2 ]] || fail "--config-dir requires a value"
       CONFIG_DIR="$2"
-      shift 2
-      ;;
-    --dotfiles-url)
-      [[ $# -ge 2 ]] || fail "--dotfiles-url requires a value"
-      DOTFILES_URL="$2"
-      shift 2
-      ;;
-    --dotfiles-dir)
-      [[ $# -ge 2 ]] || fail "--dotfiles-dir requires a value"
-      DOTFILES_DIR="$2"
       shift 2
       ;;
     --yes)
@@ -156,8 +142,6 @@ choose_profile() {
 
 [[ "$BASE_URL" != *'"'* && "$BASE_URL" != *$'\n'* ]] || fail "invalid --base-url"
 [[ "$CONFIG_URL" != *'"'* && "$CONFIG_URL" != *$'\n'* ]] || fail "invalid --config-url"
-[[ -n "$DOTFILES_URL" && "$DOTFILES_URL" != *$'\n'* ]] || fail "invalid --dotfiles-url"
-[[ -n "$DOTFILES_DIR" ]] || fail "invalid --dotfiles-dir"
 [[ "$USER" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "unsupported username: $USER"
 [[ "$(id -u)" -ne 0 ]] || fail "run this installer as your normal user, not root"
 
@@ -217,11 +201,70 @@ fi
 
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
 
+initialize_profile_interactive() {
+  local answer profile_dir remote_url origin
+
+  [[ -z "$CONFIG_URL" && -t 0 ]] || return
+  printf 'Create or connect a personal profile repository? [y/N] '
+  read -r answer
+  [[ "$answer" == "y" || "$answer" == "Y" ]] || return
+  command -v git >/dev/null 2>&1 || fail "Git is required to create a personal profile repository"
+
+  printf 'Profile directory [%s]: ' "$HOME/.config/thoughtoinnovate-profile"
+  read -r profile_dir
+  profile_dir="${profile_dir:-$HOME/.config/thoughtoinnovate-profile}"
+  case "$profile_dir" in
+    \~/*) profile_dir="$HOME/${profile_dir#\~/}" ;;
+    /*) ;;
+    *) profile_dir="$PWD/$profile_dir" ;;
+  esac
+  [[ "$profile_dir" != *$'\n'* ]] || fail "invalid profile directory"
+
+  printf 'GitHub/GitLab SSH remote URL (optional): '
+  read -r remote_url
+  [[ "$remote_url" != *$'\n'* ]] || fail "invalid profile remote"
+
+  if [[ -e "$profile_dir" && ! -d "$profile_dir" ]]; then
+    fail "$profile_dir exists but is not a directory"
+  fi
+  mkdir -p "$profile_dir"
+
+  if [[ -d "$profile_dir/.git" ]]; then
+    [[ -z "$(git -C "$profile_dir" status --porcelain)" ]] \
+      || fail "$profile_dir has uncommitted changes"
+    if [[ -n "$remote_url" ]]; then
+      origin="$(git -C "$profile_dir" remote get-url origin 2>/dev/null || true)"
+      [[ -z "$origin" || "${origin%.git}" == "${remote_url%.git}" ]] \
+        || fail "$profile_dir origin does not match $remote_url"
+      [[ -n "$origin" ]] || git -C "$profile_dir" remote add origin "$remote_url"
+    fi
+  else
+    if find "$profile_dir" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+      fail "$profile_dir is not empty and is not a Git repository"
+    fi
+    git -C "$profile_dir" init --quiet --initial-branch=main
+    [[ -z "$remote_url" ]] || git -C "$profile_dir" remote add origin "$remote_url"
+  fi
+
+  if [[ ! -e "$profile_dir/flake.nix" ]]; then
+    (cd "$profile_dir" && nix "${NIX_FLAGS[@]}" flake init -t "$BASE_URL#profile")
+  fi
+  [[ -x "$profile_dir/setup.sh" ]] || fail "$profile_dir/setup.sh is missing or not executable"
+
+  CONFIG_URL="path:$profile_dir"
+  printf 'Created personal profile at %s.\n' "$profile_dir"
+  printf 'Review its files before running git add, commit, or push.\n'
+}
+
+initialize_profile_interactive
+
 if [[ -n "$CONFIG_URL" ]]; then
-  command -v jq >/dev/null 2>&1 \
-    || fail "profile setup requires the packaged setup app (nix run ...#setup)"
+  if ! command -v jq >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
+    fail "profile setup requires the packaged setup app (nix run ...#setup)"
+  fi
   schema_version="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.schemaVersion")"
-  [[ "$schema_version" == "1" ]] || fail "unsupported profile schema: $schema_version"
+  [[ "$schema_version" == "1" || "$schema_version" == "2" ]] \
+    || fail "unsupported profile schema: $schema_version"
   if [[ -z "$SELECTED_SHELL" ]]; then
     SELECTED_SHELL="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.defaults.shell")"
   fi
@@ -343,104 +386,30 @@ nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- \
 
 export PATH="$HOME/.nix-profile/bin:$PATH"
 
-normalize_repository() {
-  local repository="$1"
-  repository="${repository%.git}"
-  repository="${repository#https://github.com/}"
-  repository="${repository#ssh://git@github.com/}"
-  repository="${repository#git@github.com:}"
-  printf '%s' "$repository"
+compose_profile_components() {
+  local composer
+  composer="${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}"
+  [[ -r "$composer" ]] || fail "dotfile composer is missing: $composer"
+
+  nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.dotfiles" \
+    | bash "$composer" --shell "$SELECTED_SHELL"
 }
 
-sync_dotfiles() {
-  local dotfiles_rev origin package
-  local -a stow_packages
+compose_bundled_dotfiles() {
+  local composer dotfiles_path
+  composer="${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}"
+  [[ -r "$composer" ]] || fail "dotfile composer is missing: $composer"
+  dotfiles_path="$(nix "${NIX_FLAGS[@]}" eval --raw "$BASE_URL#lib.dotfiles.path")"
+  [[ -d "$dotfiles_path" ]] || fail "bundled dotfiles are missing: $dotfiles_path"
 
-  command -v git >/dev/null 2>&1 || fail "Git was not found after Home Manager activation"
-  command -v stow >/dev/null 2>&1 || fail "Stow was not found after Home Manager activation"
-
-  dotfiles_rev="$(nix "${NIX_FLAGS[@]}" eval --raw "$BASE_URL#lib.dotfiles.rev")"
-  [[ "$dotfiles_rev" =~ ^[0-9a-f]{40}$ ]] || fail "base flake returned an invalid dotfiles revision"
-
-  if [[ -e "$DOTFILES_DIR" ]]; then
-    [[ -d "$DOTFILES_DIR/.git" ]] || fail "$DOTFILES_DIR exists but is not a Git checkout"
-    origin="$(git -C "$DOTFILES_DIR" remote get-url origin)" \
-      || fail "$DOTFILES_DIR has no origin remote"
-    [[ "$(normalize_repository "$origin")" == "$(normalize_repository "$DOTFILES_URL")" ]] \
-      || fail "$DOTFILES_DIR origin does not match $DOTFILES_URL"
-    [[ -z "$(git -C "$DOTFILES_DIR" status --porcelain)" ]] \
-      || fail "$DOTFILES_DIR has local changes; commit or move them before updating"
-    git -C "$DOTFILES_DIR" fetch --quiet origin "$dotfiles_rev"
-  else
-    mkdir -p "$(dirname "$DOTFILES_DIR")"
-    git clone "$DOTFILES_URL" "$DOTFILES_DIR"
-  fi
-
-  git -C "$DOTFILES_DIR" checkout --quiet --detach "$dotfiles_rev"
-
-  stow_packages=(common starship "$SELECTED_SHELL" ghostty nvim)
-  for package in "${stow_packages[@]}"; do
-    [[ -d "$DOTFILES_DIR/$package" ]] \
-      || fail "pinned dotfiles do not contain the '$package' Stow package"
-  done
-
-  if ! stow --simulate --restow --no-folding --dir="$DOTFILES_DIR" --target="$HOME" "${stow_packages[@]}"; then
-    fail "Stow found a conflict; existing files were left unchanged"
-  fi
-
-  stow --restow --no-folding --dir="$DOTFILES_DIR" --target="$HOME" "${stow_packages[@]}"
-  printf '  Dotfiles: %s at %s\n' "$DOTFILES_DIR" "$dotfiles_rev"
-}
-
-compose_profile_dotfiles() {
-  local backup_dir current_dir dotfiles_json layer layer_name package package_dir
-  local source_dir stow_root temp_dir
-
-  dotfiles_json="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.dotfiles")"
-  [[ "$(jq -r '.layers | length' <<<"$dotfiles_json")" -gt 0 ]] \
-    || fail "profile must define at least one dotfile layer"
-
-  stow_root="${XDG_DATA_HOME:-$HOME/.local/share}/thoughtoinnovate/dotfiles"
-  current_dir="$stow_root/current"
-  temp_dir="$stow_root/.current.new.$$"
-  backup_dir="$stow_root/.current.previous.$$"
-  mkdir -p "$temp_dir"
-
-  while IFS= read -r layer; do
-    layer_name="$(jq -r '.name' <<<"$layer")"
-    source_dir="$(jq -r '.source' <<<"$layer")"
-    [[ -d "$source_dir" ]] || fail "dotfile layer '$layer_name' source is missing: $source_dir"
-
-    while IFS= read -r package; do
-      [[ "$package" == "@shell" ]] && package="$SELECTED_SHELL"
-      package_dir="$source_dir/$package"
-      [[ -d "$package_dir" ]] \
-        || fail "dotfile layer '$layer_name' has no '$package' package"
-      cp -a "$package_dir/." "$temp_dir/" \
-        || fail "could not merge '$layer_name/$package'; check for file/directory conflicts"
-    done < <(jq -r '.packages[]' <<<"$layer")
-  done < <(jq -c '.layers[]' <<<"$dotfiles_json")
-
-  if [[ -d "$current_dir" ]]; then
-    stow --delete --no-folding --dir="$stow_root" --target="$HOME" current
-    mv "$current_dir" "$backup_dir"
-  fi
-  mv "$temp_dir" "$current_dir"
-
-  if stow --simulate --restow --no-folding --dir="$stow_root" --target="$HOME" current \
-    && stow --restow --no-folding --dir="$stow_root" --target="$HOME" current; then
-    rm -rf "$backup_dir"
-  else
-    rm -rf "$current_dir"
-    if [[ -d "$backup_dir" ]]; then
-      mv "$backup_dir" "$current_dir"
-      stow --restow --no-folding --dir="$stow_root" --target="$HOME" current \
-        || printf 'warning: automatic dotfile rollback could not restore links\n' >&2
-    fi
-    fail "Stow found a conflict; the previous dotfile generation was restored"
-  fi
-
-  printf '  Dotfiles: composed profile at %s\n' "$current_dir"
+  jq -n --arg path "$dotfiles_path" '{
+    layers: [{
+      name: "base",
+      source: { kind: "nix", path: $path },
+      entries: ["common", "starship", "@shell", "ghostty", "nvim"]
+        | map({ from: ., to: ".", mode: "merge" })
+    }]
+  }' | bash "$composer" --shell "$SELECTED_SHELL"
 }
 
 install_macos_ghostty() {
@@ -456,9 +425,9 @@ install_macos_ghostty() {
 }
 
 if [[ -n "$CONFIG_URL" ]]; then
-  compose_profile_dotfiles
+  compose_profile_components
 else
-  sync_dotfiles
+  compose_bundled_dotfiles
 fi
 install_macos_ghostty
 

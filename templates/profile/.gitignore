@@ -1,3 +1,14 @@
 .DS_Store
+.env
+.env.local
+.env.*.local
+*.key
+*.p12
+*.pem
+*.pfx
+credentials/
+secrets/
+dotfiles/custom/.aws/credentials
+dotfiles/custom/.connections/
 result
 result-*

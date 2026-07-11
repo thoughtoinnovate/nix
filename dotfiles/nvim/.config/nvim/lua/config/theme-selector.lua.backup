@@ -1,0 +1,58 @@
+local pickers = require('telescope.pickers')
+local finders = require('telescope.finders')
+local sorters = require('telescope.sorters')
+local actions = require('telescope.actions')
+local action_state = require('telescope.actions.state')
+local telescope = require('telescope')
+
+function LoadAndApplyFilteredThemes(all_theme_names, filter_pattern)
+    local filtered_themes = {}
+    for _, name in ipairs(all_theme_names) do
+        if name:match(filter_pattern) then
+            table.insert(filtered_themes, name)
+        end
+    end
+
+    pickers.new({}, {
+        prompt_title = "Select Filtered Theme",
+        finder = finders.new_table {
+            results = filtered_themes,
+        },
+        sorter = sorters.get_generic_fuzzy_sorter(),
+        attach_mappings = function(prompt_bufnr, map)
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value then
+                    local ok, err = pcall(vim.cmd, 'colorscheme ' .. selection.value)
+                    if not ok then
+                        vim.notify("Error applying theme: " .. err, vim.log.levels.ERROR)
+                    end
+                end
+                actions.close(prompt_bufnr)
+            end)
+            return true
+        end,
+    }):find()
+end
+
+local function get_all_themes()
+    local theme_dir = vim.fn.stdpath("config") .. "/lua/themes"
+    local theme_files = vim.fn.readdir(theme_dir)
+    local theme_names = {}
+    for _, file in ipairs(theme_files) do
+        if file:match("%.lua$") then
+            local theme_name = file:sub(1, -5) -- Remove the ".lua" extension
+            table.insert(theme_names, theme_name)
+        end
+    end
+    return theme_names
+end
+
+-- Define the theme_names variable
+local theme_names = get_all_themes()
+
+-- Create user command using filtered themes (e.g. themes with "dark" in the name)
+vim.api.nvim_create_user_command('Themes', function()
+    LoadAndApplyFilteredThemes(theme_names, "")
+end, {})
+

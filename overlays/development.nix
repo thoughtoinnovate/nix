@@ -9,6 +9,38 @@ let
   ++ lib.optionals final.stdenv.hostPlatform.isDarwin [ "/Applications" ];
 in
 {
+  neovimDevelopmentPackages = with final; [
+    bash-language-server
+    black
+    cargo
+    delve
+    eslint
+    go
+    google-java-format
+    golangci-lint
+    gopls
+    imagemagick
+    jdt-language-server
+    jupyter
+    lua-language-server
+    markdownlint-cli2
+    marksman
+    prettier
+    pyright
+    ruff
+    rust-analyzer
+    rustc
+    shellcheck
+    shfmt
+    sqlfluff
+    stylua
+    taplo
+    typescript-language-server
+    vscode-js-debug
+    vscode-langservers-extracted
+    yaml-language-server
+  ];
+
   jdkForVersion =
     jdkVersion:
     if final.stdenv.hostPlatform.isLinux then
@@ -16,13 +48,16 @@ in
     else
       final."jdk${toString jdkVersion}";
 
-  extendedDevPackages = with final; [
-    gradle
-    kubectl
-    lazygit
-    minikube
-    vscode
-  ];
+  extendedDevPackages =
+    with final;
+    [
+      gradle
+      kubectl
+      lazygit
+      minikube
+      vscode
+    ]
+    ++ final.neovimDevelopmentPackages;
 
   fullDevBasePackages = final.basePackagesWithoutJava ++ [ (final.jdkForVersion 17) ];
 

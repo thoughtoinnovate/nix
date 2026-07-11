@@ -1,21 +1,5 @@
 {
   "nodes": {
-    "dotfiles": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1783697488,
-        "narHash": "sha256-viz1Lk7TKcmT3b7XcixtSmMp3tTGOstA91W5Lmn+enk=",
-        "owner": "thoughtoinnovate",
-        "repo": "dotfiles",
-        "rev": "99d8a6e344d79e937129fdf0066575c38fb80de2",
-        "type": "github"
-      },
-      "original": {
-        "owner": "thoughtoinnovate",
-        "repo": "dotfiles",
-        "type": "github"
-      }
-    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -92,7 +76,6 @@
     },
     "root": {
       "inputs": {
-        "dotfiles": "dotfiles",
         "flake-utils": "flake-utils",
         "home-manager": "home-manager",
         "nix-darwin": "nix-darwin",
