@@ -207,7 +207,7 @@ initialize_profile_interactive() {
   [[ -z "$CONFIG_URL" && -t 0 ]] || return
   printf 'Create or connect a personal profile repository? [y/N] '
   read -r answer
-  [[ "$answer" == "y" || "$answer" == "Y" ]] || return
+  [[ "$answer" == "y" || "$answer" == "Y" ]] || return 0
   command -v git >/dev/null 2>&1 || fail "Git is required to create a personal profile repository"
 
   printf 'Profile directory [%s]: ' "$HOME/.config/thoughtoinnovate-profile"
