@@ -535,17 +535,78 @@ add_profile_groups() {
   mv "$temporary" "$file"
 }
 
-show_package_groups() {
-  local catalog group count packages
+select_package_groups() {
+  local catalog group count packages selected selection token index valid line
+  local rows=() selected_groups=() tokens=()
   catalog="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "$BASE_URL#lib.packageCatalog.groups" 2>/dev/null || printf '{}')"
   [[ "$(jq -r 'type' <<<"$catalog")" == object ]] || return 0
-  printf '\nSelectable package groups (exact download and closure sizes appear in plan):\n'
+  printf '\nOptional package groups (exact download and closure sizes appear in plan):\n'
   while IFS= read -r group; do
     count="$(jq -r --arg group "$group" '.[$group] | length' <<<"$catalog")"
     packages="$(jq -r --arg group "$group" '.[$group] | join(", ")' <<<"$catalog")"
     printf '  %-13s %2s packages  %s\n' "$group" "$count" "$packages"
+    rows+=("$(printf '%-13s %2s packages  %s' "$group" "$count" "$packages")")
   done < <(jq -r 'keys[]' <<<"$catalog")
+
+  if ((${#REQUESTED_GROUPS[@]} > 0)); then
+    printf 'Selected package groups from --group: %s\n' "$(IFS=', '; printf '%s' "${REQUESTED_GROUPS[*]}")"
+    return 0
+  fi
+  [[ -t 0 ]] || return 0
+
+  if command -v gum >/dev/null 2>&1; then
+    selected="$(
+      {
+        printf '%-13s %s\n' skip 'No optional package groups'
+        printf '%s\n' "${rows[@]}"
+      } | gum choose --no-limit --ordered --height=12 --show-help \
+        --header='↑/↓ move • SPACE select/unselect • ENTER confirm • choose skip for none' \
+        --cursor-prefix='› ' --selected-prefix='✓ ' --unselected-prefix='○ ' \
+        || true
+    )"
+    while IFS= read -r line; do
+      group="${line%%[[:space:]]*}"
+      [[ -n "$group" && "$group" != skip ]] || continue
+      selected_groups+=("$group")
+    done <<<"$selected"
+  else
+    index=0
+    for group in $(jq -r 'keys[]' <<<"$catalog"); do
+      printf '  %d) %s\n' "$((++index))" "$group"
+    done
+    while :; do
+      printf 'Select group numbers or names separated by commas, or Enter to skip: '
+      read -r selection
+      [[ -n "$selection" ]] || break
+      selected_groups=()
+      tokens=()
+      read -r -a tokens <<<"${selection//,/ }"
+      valid=true
+      for token in "${tokens[@]}"; do
+        if [[ "$token" =~ ^[0-9]+$ ]]; then
+          index=$((10#$token - 1))
+          group="$(jq -r --argjson index "$index" 'keys[$index] // empty' <<<"$catalog")"
+        else
+          group="$token"
+        fi
+        if [[ -z "$group" ]] || ! jq -e --arg group "$group" 'has($group)' >/dev/null <<<"$catalog"; then
+          warn "unknown package group: $token"
+          valid=false
+          break
+        fi
+        printf '%s\n' "${selected_groups[@]}" | grep -Fxq "$group" || selected_groups+=("$group")
+      done
+      "$valid" && break
+    done
+  fi
+
+  if ((${#selected_groups[@]} == 0)); then
+    printf 'No optional package groups selected.\n'
+  else
+    REQUESTED_GROUPS=("${selected_groups[@]}")
+    printf 'Selected package groups: %s\n' "$(IFS=', '; printf '%s' "${REQUESTED_GROUPS[*]}")"
+  fi
 }
 
 add_profile_unfree() {
@@ -1467,10 +1528,26 @@ uninstall_command() {
   fi
   printf 'HomeWeave uninstall target: %s\n' "$ROOT"
   printf 'Nix itself and unrelated Homebrew packages will not be removed.\n'
+
+  # Nuke confirmation must happen before Home Manager, Stow, provider, state,
+  # or repository changes. --yes intentionally cannot bypass this guard.
+  if "$UNINSTALL_NUKE" && ! "$DRY_RUN"; then
+    [[ -t 0 ]] || fail "uninstall --nuke requires an interactive typed confirmation"
+    printf 'This permanently deletes only the HomeWeave root after removing recorded HomeWeave effects.\n'
+    printf 'Type the complete phrase shown below exactly:\n  DELETE %s\nConfirmation: ' "$ROOT"
+    read -r confirmation
+    [[ "$confirmation" == "DELETE $ROOT" ]] || fail "nuke confirmation did not match; nothing was changed"
+  fi
+
   if "$UNINSTALL_ALL" || "$ASSUME_YES"; then
     UNINSTALL_REMOVE_CASKS=true
   fi
-  if [[ -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
+  if "$UNINSTALL_NUKE"; then
+    UNINSTALL_ARCHIVE_ROOT=false
+  elif "$UNINSTALL_ALL" && [[ -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
+    confirm "Proceed with uninstall --all and remove every recorded HomeWeave effect?" \
+      || fail "uninstall --all cancelled"
+  elif [[ -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
     confirm "Remove the Home Manager environment?" || UNINSTALL_KEEP_HOME_MANAGER=true
     confirm "Unlink HomeWeave-managed dotfiles?" || UNINSTALL_KEEP_DOTFILES=true
     confirm "Restore available pre-adoption dotfiles?" || UNINSTALL_NO_RESTORE=true
@@ -1490,10 +1567,6 @@ uninstall_command() {
       printf 'Would retain Nix and would not run global garbage collection.\n'
       return
     fi
-    [[ -t 0 ]] || fail "uninstall --nuke requires an interactive typed confirmation"
-    printf 'Type DELETE %s to permanently remove only the HomeWeave root: ' "$ROOT"
-    read -r confirmation
-    [[ "$confirmation" == "DELETE $ROOT" ]] || fail "nuke confirmation did not match"
     rm -rf "$ROOT"
     printf 'HomeWeave root removed. Nix and the shared store were retained.\n'
     return
@@ -1551,7 +1624,7 @@ setup_command() {
     accept_unfree_packages "$pinned" "${filtered_packages[@]}"
     add_profile_packages "${filtered_packages[@]}"
   fi
-  [[ ! -t 0 ]] || show_package_groups
+  select_package_groups
   if [[ -n "${REQUESTED_GROUPS[*]-}" ]]; then
     add_profile_groups "${REQUESTED_GROUPS[@]}"
     for group in "${REQUESTED_GROUPS[@]}"; do

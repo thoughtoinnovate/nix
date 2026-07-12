@@ -157,6 +157,13 @@ run_cli uninstall --all --dry-run --yes | grep -Fq 'Repository retained'
 run_cli uninstall --nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
 run_cli uninstall nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
 run_cli uninstall all --dry-run --yes | grep -Fq 'Repository retained'
+printf 'must-remain\n' >"$ROOT/.state/active-profile"
+if run_cli uninstall nuke --yes 2>"$TEST_ROOT/nuke-confirmation-error"; then
+  printf 'expected non-interactive nuke to fail before making changes\n' >&2
+  exit 1
+fi
+grep -Fq 'requires an interactive typed confirmation' "$TEST_ROOT/nuke-confirmation-error"
+test "$(<"$ROOT/.state/active-profile")" = must-remain
 if run_cli uninstall unexpected --dry-run --yes 2>"$TEST_ROOT/uninstall-mode-error"; then
   printf 'expected an unknown uninstall mode to fail\n' >&2
   exit 1

@@ -15,10 +15,7 @@ in
   config = lib.mkIf cfg.enable {
     homeWeave.base.enable = lib.mkDefault true;
 
-    nixpkgs = {
-      overlays = [ (import ../../overlays/development.nix) ];
-      config.allowUnfreePredicate = lib.mkDefault (_: false);
-    };
+    nixpkgs.overlays = [ (import ../../overlays/development.nix) ];
 
     home.packages = pkgs.leanDevelopmentPackages;
   };

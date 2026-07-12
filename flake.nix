@@ -109,6 +109,16 @@
             config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
             config.allowUnsupportedSystem = true;
           };
+          unfreePkgs = import packageSource {
+            inherit system;
+            overlays = [
+              darwinCacheOverlay
+              baseOverlay
+              developmentOverlay
+            ];
+            config.allowUnfreePredicate = pkg: packageSource.lib.getName pkg == "claude-code";
+            config.allowUnsupportedSystem = true;
+          };
           homeTest =
             shell: development:
             selectedHomeManager.lib.homeManagerConfiguration {
@@ -146,6 +156,22 @@
                 "nushell"
                 "zsh"
               ];
+          unfreeHomeTest = selectedHomeManager.lib.homeManagerConfiguration {
+            pkgs = unfreePkgs;
+            modules = [
+              self.homeModules.default
+              {
+                home = {
+                  username = "test-user";
+                  homeDirectory =
+                    if unfreePkgs.stdenv.hostPlatform.isDarwin then "/Users/test-user" else "/home/test-user";
+                  stateVersion = "26.05";
+                  packages = [ unfreePkgs.claude-code ];
+                };
+                homeWeave.development.enable = true;
+              }
+            ];
+          };
         in
         {
           packages = {
@@ -231,6 +257,12 @@
 
             home-module-evaluation = builtins.deepSeq homeTestDerivations (
               pkgs.runCommand "home-module-evaluation" { } ''
+                touch $out
+              ''
+            );
+
+            unfree-profile-evaluation = builtins.deepSeq unfreeHomeTest.activationPackage.drvPath (
+              pkgs.runCommand "unfree-profile-evaluation" { } ''
                 touch $out
               ''
             );

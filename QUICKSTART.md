@@ -58,7 +58,17 @@ Check what HomeWeave installed:
 
 ## Add optional toolchains
 
-Keep `development` lean and add large toolchains through `packageGroups` in
+Keep `development` lean and add large toolchains through the interactive
+package-group selector during setup. Use Space to toggle groups and Enter to
+confirm, or choose `skip` to install none. For scripted setup, repeat
+`--group`:
+
+```sh
+home-weave setup --profile work --extends development \
+  --group python --group go --group cloud --no-apply
+```
+
+Groups can also be changed later through `packageGroups` in
 `~/.home-weave/nix/<profile>/profile.nix`:
 
 ```nix
@@ -144,7 +154,8 @@ Common modes:
 # Remove all active HomeWeave effects proven by ownership records.
 ~/.home-weave/home-weave uninstall --all
 
-# Also delete the HomeWeave repository after typed confirmation.
+# Also delete the HomeWeave repository after typing the complete displayed
+# phrase: DELETE /absolute/path/to/home-weave-root
 ~/.home-weave/home-weave uninstall --nuke
 ```
 

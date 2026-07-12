@@ -92,6 +92,10 @@ profile. Non-interactive setup uses `--profile NAME --extends base|development`.
 The optional-package checklist uses arrow keys to move, Space to toggle any
 number of entries, and Enter to confirm the selected set.
 
+The preceding package-group checklist uses the same controls. Select `skip`
+to add no optional toolchain groups. Supplying one or more `--group NAME`
+options bypasses that interactive group chooser.
+
 Nixpkgs search results show the declared upstream homepage, Nixpkgs maintainer
 handles, license, and description in a preview panel. Nixpkgs repository trust
 does not by itself verify the upstream publisher. HomeWeave shows a green
