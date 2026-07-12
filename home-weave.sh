@@ -144,6 +144,30 @@ require_commands() {
   done
 }
 
+run_with_spinner() {
+  local label="$1" output_file="$2" pid frame=0 status frames="|/-\\"
+  shift 2
+  if [[ ! -t 2 ]]; then
+    "$@" >"$output_file"
+    return
+  fi
+  "$@" >"$output_file" 2>"$output_file.stderr" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r%s %s' "${frames:frame++%4:1}" "$label" >&2
+    sleep 0.12
+  done
+  if wait "$pid"; then status=0; else status=$?; fi
+  if ((status == 0)); then
+    printf '\r✓ %s\n' "$label" >&2
+  else
+    printf '\r✗ %s\n' "$label" >&2
+    [[ ! -s "$output_file.stderr" ]] || sed -n '1,8p' "$output_file.stderr" >&2
+  fi
+  rm -f "$output_file.stderr"
+  return "$status"
+}
+
 prune_backups() {
   local backups=( ) index
   [[ -d "$ROOT/backup" ]] || return 0
@@ -361,8 +385,15 @@ add_profile_unfree() {
 }
 
 pinned_nixpkgs_ref() {
-  local metadata locked_type owner repo rev
-  metadata="$(nix --extra-experimental-features 'nix-command flakes' flake metadata --json "$BASE_URL" 2>/dev/null)" || return 1
+  local metadata metadata_file locked_type owner repo rev
+  metadata_file="$(mktemp)"
+  if ! run_with_spinner "Resolving the pinned Nixpkgs revision..." "$metadata_file" \
+    nix --extra-experimental-features 'nix-command flakes' flake metadata --json "$BASE_URL"; then
+    rm -f "$metadata_file"
+    return 1
+  fi
+  metadata="$(<"$metadata_file")"
+  rm -f "$metadata_file"
   locked_type="$(jq -r '.locks.nodes.nixpkgs.locked.type // empty' <<<"$metadata")"
   [[ "$locked_type" == github ]] || return 1
   owner="$(jq -r '.locks.nodes.nixpkgs.locked.owner' <<<"$metadata")"
@@ -372,7 +403,7 @@ pinned_nixpkgs_ref() {
 }
 
 select_optional_packages() {
-  local selected="" query="" pinned results searched="" package
+  local selected="" query="" pinned results searched="" package results_file result_count
   [[ -t 0 ]] || return 0
   printf '\nSelect optional Nix packages. Tab selects multiple entries.\n'
   if command -v fzf >/dev/null 2>&1; then
@@ -386,13 +417,43 @@ select_optional_packages() {
   read -r query
   if [[ -n "$query" ]]; then
     if pinned="$(pinned_nixpkgs_ref)"; then
-      results="$(nix --extra-experimental-features 'nix-command flakes' search "$pinned" "$query" --json 2>/dev/null || true)"
-      if [[ -n "$results" ]]; then
-        searched="$(jq -r 'keys[] | split(".") | .[2:] | join(".")' <<<"$results" \
-          | while IFS= read -r package; do
-              grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS" || printf '%s\n' "$package"
-            done \
-          | fzf --multi --prompt='Pinned Nixpkgs results> ' || true)"
+      results_file="$(mktemp)"
+      if run_with_spinner "Searching pinned Nixpkgs for '$query'..." "$results_file" \
+        nix --extra-experimental-features 'nix-command flakes' search "$pinned" "$query" --json; then
+        results="$(<"$results_file")"
+      else
+        results=""
+        warn "Nixpkgs search failed; verify network access and try again"
+      fi
+      rm -f "$results_file"
+      if [[ -n "$results" ]] && jq -e 'type == "object"' >/dev/null <<<"$results"; then
+        result_count="$(jq 'length' <<<"$results")"
+        if ((result_count == 0)); then
+          printf 'No installable Nixpkgs packages matched %q.\n' "$query"
+        else
+          printf 'Fetched %s matching package(s) from pinned Nixpkgs.\n' "$result_count"
+          printf 'Nixpkgs is the packaging source; it does not verify an upstream vendor publisher.\n'
+          searched="$(jq -r '
+              to_entries[]
+              | [
+                  (.key | split(".") | .[2:] | join(".")),
+                  (.value.version // "unknown"),
+                  "Nixpkgs community",
+                  "not declared/verified",
+                  (.value.description // "")
+                ]
+              | @tsv
+            ' <<<"$results" \
+            | while IFS=$'\t' read -r package version source publisher description; do
+                if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
+                  printf '%s\t%s\t%s\t%s\t%s\n' "$package" "$version" "$source" "$publisher" "$description"
+                fi
+              done \
+            | fzf --multi --delimiter=$'\t' --with-nth=1,2,3,4,5 \
+                --header=$'Package\tVersion\tSource\tPublisher\tDescription' \
+                --prompt='Pinned Nixpkgs results> ' \
+            | cut -f1 || true)"
+        fi
       fi
     else
       warn "could not resolve the pinned Nixpkgs input; package search was skipped"
@@ -426,7 +487,10 @@ show_provider_inventory() {
     if jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$output"; then
       MANAGED_PROVIDER_IDS+="$(jq -r '.items[] | select(.installed == true) | .id' <<<"$output")"$'\n'
       jq -r --arg provider "$(jq -r '.name' <<<"$provider")" \
-        '.items[] | select(.installed == true) | "  [\($provider)] \(.name) \(.version // "")"' <<<"$output"
+        '.items[]
+          | select(.installed == true)
+          | "  [\($provider)] \(.name) \(.version // "") — Publisher: \(.publisher // "not declared") (\(if .publisherVerified == true then "verified by provider" else "not verified" end))"' \
+        <<<"$output"
     else
       warn "provider inventory failed: $(jq -r '.name' <<<"$provider")"
     fi

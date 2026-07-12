@@ -11,6 +11,11 @@ capability list. Provider capabilities are `inventory`, `search`, `install`,
 `home-weave extension <name> ...`. HomeWeave displays provider plans and asks
 before lifecycle changes.
 
+Provider inventory/search items may declare `publisher` and
+`publisherVerified`. Set `publisherVerified = true` only when the organization
+provider has actually verified the vendor identity; HomeWeave never infers
+official status from a package name.
+
 Employees authenticate to GitLab over SSH and run:
 
 ```sh
