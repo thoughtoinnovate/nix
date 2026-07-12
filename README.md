@@ -76,6 +76,11 @@ dotfiles, and preflights Stow before activation. Existing roots are replaced
 only after confirmation and are retained under `backup/<timestamp>`; failures
 restore the original root.
 
+Nixpkgs search results show the declared upstream homepage, Nixpkgs maintainer
+handles, license, and description in a preview panel. Nixpkgs does not provide
+verified publisher identity, so HomeWeave labels official status as unverified
+unless a trusted organization provider explicitly supplies verification.
+
 Build without activation, apply, update inputs, restore, or synchronize Git:
 
 ```sh

@@ -23,6 +23,7 @@ let
     text = ''
       export HOME_WEAVE_PROFILE_TEMPLATE="''${HOME_WEAVE_PROFILE_TEMPLATE:-${../templates/profile}}"
       export HOME_WEAVE_BUNDLED_DOTFILES="''${HOME_WEAVE_BUNDLED_DOTFILES:-${../dotfiles}}"
+      export HOME_WEAVE_PACKAGE_PREVIEW="''${HOME_WEAVE_PACKAGE_PREVIEW:-${../lib/package-preview.sh}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
     '';
   };

@@ -10,6 +10,7 @@ BASE_URL="${HOME_WEAVE_BASE_URL:-github:thoughtoinnovate/nix}"
 TEMPLATE="${HOME_WEAVE_PROFILE_TEMPLATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/templates/profile}"
 PROFILE_OVERLAY="${HOME_WEAVE_PROFILE_OVERLAY:-}"
 BUNDLED_DOTFILES="${HOME_WEAVE_BUNDLED_DOTFILES:-}"
+PACKAGE_PREVIEW="${HOME_WEAVE_PACKAGE_PREVIEW:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/package-preview.sh}"
 EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[] }"
 ASSUME_YES=false
 APPLY_NOW=""
@@ -402,6 +403,72 @@ pinned_nixpkgs_ref() {
   printf 'github:%s/%s/%s' "$owner" "$repo" "$rev"
 }
 
+enrich_nixpkgs_results() {
+  local pinned="$1" results="$2" paths_file metadata_file system expression enriched
+  paths_file="$(mktemp)"
+  metadata_file="$(mktemp)"
+  jq '[keys[] | split(".") | .[2:]]' <<<"$results" >"$paths_file"
+  system="$(jq -r 'keys[0] | split(".")[1]' <<<"$results")"
+  [[ "$system" =~ ^[a-zA-Z0-9_-]+$ ]] || {
+    rm -f "$paths_file" "$metadata_file"
+    printf '%s' "$results"
+    return
+  }
+  expression="
+    let
+      flake = builtins.getFlake \"$pinned\";
+      pkgs = flake.legacyPackages.$system;
+      paths = builtins.fromJSON (builtins.readFile \"$paths_file\");
+      get = path: builtins.foldl' (set: name: builtins.getAttr name set) pkgs path;
+      licenseName = license:
+        if license == null then \"unknown\"
+        else license.spdxId or license.shortName or license.fullName or \"unknown\";
+      info = path:
+        let
+          package = get path;
+          meta = package.meta or {};
+          homepageValue = meta.homepage or null;
+          homepage =
+            if builtins.isList homepageValue
+            then if homepageValue == [] then null else builtins.head homepageValue
+            else homepageValue;
+          licenseValue = meta.license or null;
+          licenses =
+            if builtins.isList licenseValue
+            then map licenseName licenseValue
+            else [ (licenseName licenseValue) ];
+          maintainers = map
+            (maintainer: maintainer.github or maintainer.name or \"unknown\")
+            (meta.maintainers or []);
+          provenance = map
+            (item: item.shortName or item.fullName or \"unknown\")
+            (meta.sourceProvenance or []);
+        in {
+          package = builtins.concatStringsSep \".\" path;
+          inherit homepage licenses maintainers provenance;
+        };
+    in map info paths
+  "
+  if run_with_spinner "Loading upstream and maintainer details..." "$metadata_file" \
+    nix --extra-experimental-features 'nix-command flakes' eval --impure --json --expr "$expression"; then
+    enriched="$(jq -cn --argjson results "$results" --slurpfile metadata "$metadata_file" '
+      ($metadata[0] | map({key: .package, value: .}) | from_entries) as $details
+      | $results
+      | to_entries
+      | map(
+          (.key | split(".") | .[2:] | join(".")) as $package
+          | .value += ($details[$package] // {})
+        )
+      | from_entries
+    ')"
+  else
+    warn "author metadata could not be loaded; basic search results will still be shown"
+    enriched="$results"
+  fi
+  rm -f "$paths_file" "$metadata_file"
+  printf '%s' "$enriched"
+}
+
 select_optional_packages() {
   local selected="" query="" pinned results searched="" package results_file result_count
   [[ -t 0 ]] || return 0
@@ -411,7 +478,11 @@ select_optional_packages() {
       | while IFS= read -r package; do
           grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS" || printf '%s\n' "$package"
         done \
-      | fzf --multi --prompt='Optional Nix packages> ' || true)"
+      | fzf --multi \
+          --bind='space:toggle,tab:toggle+down,shift-tab:toggle+up' \
+          --marker='✓ ' --pointer='›' --info=inline-right \
+          --header='SPACE/TAB: select multiple • ENTER: confirm • ESC: cancel' \
+          --prompt='Optional Nix packages> ' || true)"
   fi
   printf 'Search the pinned official Nixpkgs repository? Enter a term or leave blank: '
   read -r query
@@ -427,31 +498,58 @@ select_optional_packages() {
       fi
       rm -f "$results_file"
       if [[ -n "$results" ]] && jq -e 'type == "object"' >/dev/null <<<"$results"; then
+        results="$(jq --arg query "${query,,}" '
+          to_entries
+          | sort_by(
+              ((.value.pname // (.key | split(".") | .[-1])) | ascii_downcase) as $name
+              | [
+                  (if $name == $query then 0 elif ($name | startswith($query)) then 1 else 2 end),
+                  ($name | length),
+                  $name
+                ]
+            )
+          | from_entries
+        ' <<<"$results")"
         result_count="$(jq 'length' <<<"$results")"
         if ((result_count == 0)); then
           printf 'No installable Nixpkgs packages matched %q.\n' "$query"
         else
           printf 'Fetched %s matching package(s) from pinned Nixpkgs.\n' "$result_count"
-          printf 'Nixpkgs is the packaging source; it does not verify an upstream vendor publisher.\n'
+          if ((result_count > 50)); then
+            printf 'Showing the first 50 results; refine the search term for a shorter list.\n'
+            results="$(jq 'to_entries | .[:50] | from_entries' <<<"$results")"
+          fi
+          results="$(enrich_nixpkgs_results "$pinned" "$results")"
+          printf 'Official status is not inferred; inspect the upstream URL and Nix maintainers.\n'
           searched="$(jq -r '
               to_entries[]
               | [
                   (.key | split(".") | .[2:] | join(".")),
                   (.value.version // "unknown"),
-                  "Nixpkgs community",
-                  "not declared/verified",
+                  (.value.homepage // "not declared"),
+                  (if ((.value.maintainers // []) | length) == 0
+                    then "not declared"
+                    else (.value.maintainers | if length > 3 then .[:3] + ["+more"] else . end | join(","))
+                    end),
+                  "not verified",
+                  ((.value.licenses // ["unknown"]) | join(",")),
                   (.value.description // "")
                 ]
               | @tsv
             ' <<<"$results" \
-            | while IFS=$'\t' read -r package version source publisher description; do
+            | while IFS=$'\t' read -r package version upstream maintainers official license description; do
                 if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
-                  printf '%s\t%s\t%s\t%s\t%s\n' "$package" "$version" "$source" "$publisher" "$description"
+                  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$package" "$version" "$upstream" "$maintainers" "$official" "$license" "$description"
                 fi
               done \
-            | fzf --multi --delimiter=$'\t' --with-nth=1,2,3,4,5 \
-                --header=$'Package\tVersion\tSource\tPublisher\tDescription' \
-                --prompt='Pinned Nixpkgs results> ' \
+            | fzf --multi --delimiter=$'\t' --with-nth=1,2,3,5 \
+                --bind='space:toggle,tab:toggle+down,shift-tab:toggle+up' \
+                --marker='✓ ' --pointer='›' --info=inline-right \
+                --header=$'Package\tVersion\tUpstream/author URL\tOfficial?' \
+                --header-first \
+                --preview="'$PACKAGE_PREVIEW' {}" --preview-window='down,45%,wrap' \
+                --prompt='SPACE/TAB select • ENTER confirm > ' \
             | cut -f1 || true)"
         fi
       fi
