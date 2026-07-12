@@ -17,9 +17,9 @@ in
 
     nixpkgs = {
       overlays = [ (import ../../overlays/development.nix) ];
-      config.allowUnfreePredicate = lib.mkDefault (pkg: builtins.elem (lib.getName pkg) [ "vscode" ]);
+      config.allowUnfreePredicate = lib.mkDefault (_: false);
     };
 
-    home.packages = [ pkgs.full-development-environment ];
+    home.packages = pkgs.leanDevelopmentPackages;
   };
 }

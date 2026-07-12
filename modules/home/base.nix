@@ -24,6 +24,23 @@ in
       description = "Shells to install and configure. The bootstrap script normally selects one.";
     };
 
+    packageGroups = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.enum [
+          "python"
+          "data-jupyter"
+          "go"
+          "rust"
+          "java"
+          "web"
+          "cloud"
+          "desktop"
+        ]
+      );
+      default = [ ];
+      description = "Optional, named HomeWeave package groups.";
+    };
+
   };
 
   config = lib.mkIf cfg.enable {
@@ -39,8 +56,6 @@ in
     home.packages =
       pkgs.commonToolPackages
       ++ map (shell: pkgs.shellPackages.${shell}) cfg.shells
-      ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.ghostty ];
-
-    fonts.fontconfig.enable = pkgs.stdenv.hostPlatform.isLinux;
+      ++ lib.concatMap (group: pkgs.homeWeavePackageGroups.${group}) cfg.packageGroups;
   };
 }

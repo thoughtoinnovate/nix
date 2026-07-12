@@ -3,8 +3,16 @@
 Reusable Nix overlays and Home Manager modules for a consistent terminal and
 development environment on Linux and macOS.
 
-Supported systems are `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
-Current Nixpkgs unstable no longer supports Intel macOS.
+New user? Start with the [HomeWeave quick-start guide](./QUICKSTART.md).
+
+Supported systems are `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`, and
+`x86_64-darwin`. The primary pin is the official `nixpkgs-unstable` branch.
+Because upstream 26.11 removed Intel Darwin, that one system uses the final
+official, security-maintained `nixpkgs-26.05-darwin` branch.
+Darwin currently also takes Starship from that official 26.05 pin because the
+July 11 unstable linker fix has not yet reached `cache.nixos.org`; this narrow
+fallback prevents local Rust/linker compilation and can be removed after a
+reviewed unstable output is verifiably substituted.
 
 This repository is the public base layer. Personal and organization-specific
 repositories should consume it as a flake input and add their own overlays or
@@ -12,20 +20,20 @@ modules. Credentials and proprietary source code do not belong here.
 
 ## Profiles
 
-- `base`: Bash, Fish, Zsh, Nushell, Git, Neovim, Starship, curl, wget, Stow,
-  FiraCode Nerd Font, Java 21, Ghostty on Linux, and Neovim essentials including
-  ripgrep, fd, Node.js, Python, unzip, make, and Clang. Java uses Amazon
-  Corretto on Linux and OpenJDK on macOS.
-- `development`: everything in `base`, plus Gradle, kubectl, minikube,
-  lazygit, VS Code, Java 11/17/21 development shells, Go, Rust, common language
-  servers, Google Java Format, Jupyter, and ImageMagick.
+- `base`: HomeWeave, selected shells, Git, Stow, Starship, Neovim, and its
+  minimal editor/runtime dependencies.
+- `development`: everything in `base`, plus `jq`, tmux, lazygit, ShellCheck,
+  and shfmt.
+- opt-in groups: `python`, `data-jupyter`, `go`, `rust`, `java`, `web`,
+  `cloud`, and `desktop`. Profiles merge inherited `packageGroups` and
+  `nixPackages` uniquely.
 - `darwin`: nix-darwin integration and optional Homebrew installation of the
   Ghostty macOS application.
 
-Ghostty is installed from Nixpkgs on Linux. On macOS, the bootstrap uses the
-official Homebrew cask when Homebrew is available; the nix-darwin module can
-manage the same cask declaratively. Default configuration comes from the
-sanitized dotfile template bundled in this repository.
+On macOS, Ghostty can be selected explicitly from the official Homebrew cask;
+the nix-darwin module can manage the same cask declaratively. Linux users may
+add Ghostty explicitly. Default configuration comes from the sanitized dotfile
+template bundled in this repository.
 
 ## Test the base
 
@@ -83,6 +91,12 @@ Nixpkgs search results show the declared upstream homepage, Nixpkgs maintainer
 handles, license, and description in a preview panel. Nixpkgs does not provide
 verified publisher identity, so HomeWeave labels official status as unverified
 unless a trusted organization provider explicitly supplies verification.
+Users may search multiple keywords in one setup session; selections accumulate
+across searches and are shown in one final provenance table for confirmation
+before the profile is changed. Packages already supplied by the selected
+profile (including inherited base/development defaults and selected shells)
+are identified as already included, omitted from the selector, and are not
+written to `nixPackages` again.
 
 Build without activation, apply, update inputs, restore, or synchronize Git:
 
@@ -90,20 +104,51 @@ Build without activation, apply, update inputs, restore, or synchronize Git:
 home-weave plan
 home-weave apply
 home-weave update
+home-weave profile list
+home-weave profile show development
+home-weave profile create work --extends development
+home-weave profile diff work
+home-weave profile switch work
+home-weave status
+home-weave status --json
 home-weave restore git@gitlab.com:group/my-home-weave.git
 home-weave sync
 home-weave uninstall
 ```
 
+During interactive `setup`, select `base`, `development`, an existing custom
+profile, or `+ create custom profile`. Non-interactively, a new profile can be
+created with `setup --profile work --extends development`. To preview and then
+switch an existing repository to another profile:
+
+```sh
+~/.home-weave/home-weave plan --profile work
+~/.home-weave/home-weave apply --profile work
+```
+
+`plan` performs a Nix dry-run and reports compressed download size, expanded
+closure size, substitutions, local builds, unfree packages, and unsupported
+packages. Downloads over 1 GiB and local compilation require confirmation.
+Operations that mutate a repository are serialized with a per-root lock.
+
+`plan` never changes the active selection. A successful `apply --profile NAME`
+records that profile as active, so later `plan` and `apply` commands use it by
+default. Profiles configure the same user account and home directory; switching
+replaces the Home Manager generation and reconciles the generated Stow links.
+Receipts under `.state/receipts/` record packages, applications, dotfiles,
+changes, cache/build decisions, and rollback generations; `latest` references
+the most recent successful activation.
+
 `install.sh` remains the compatibility activation backend. New users should use
 the `home-weave` command.
 
-`home-weave uninstall` can remove the Home Manager environment, unlink only
+`home-weave uninstall`, `uninstall --profile NAME`, `uninstall --all`, and
+`uninstall --nuke` can remove the Home Manager environment, unlink only
 the active HomeWeave Stow generation, restore missing pre-adoption files,
-optionally remove casks recorded as installed by HomeWeave, and optionally
-archive the repository. It keeps the repository by default and never removes
-Nix or unrelated Homebrew packages. Preview it with `home-weave uninstall
---dry-run`.
+and remove only applications proven by HomeWeave receipts. Normal and `--all`
+keep the repository; `--nuke` requires typed confirmation and removes only the
+HomeWeave root. No mode removes Nix or runs global garbage collection. Every
+mode supports `--dry-run`.
 
 ## Create a personal or work profile
 
@@ -130,6 +175,12 @@ versioned provider contract supports inventory, search, install, update, and
 remove operations with a displayed plan and explicit confirmation. IRU code
 belongs only in the private work repository; the public core contains the
 generic provider interface.
+
+The built-in `native-official` provider supports official Homebrew
+formulae/casks on macOS, configured official Debian/Ubuntu APT repositories,
+and official Arch Pacman repositories. Unknown Linux distributions remain
+Nixpkgs-only. Third-party taps, AUR, and third-party APT/Pacman repositories
+are rejected; privileged plans print the exact command before confirmation.
 
 GUI applications launched from Finder, Spotlight, or a desktop menu generally
 do not source interactive shell files. Configure those applications with an
@@ -257,7 +308,7 @@ updates the package snapshot and must be reviewed like a dependency upgrade.
 Nixpkgs packages are maintained build recipes, not a guarantee that each
 vendor publishes or endorses the Nix package. In particular, CLI packages such
 as Codex, Claude Code, and OpenCode should be reviewed in Nixpkgs before each
-lock update. Ghostty's Linux package comes from Nixpkgs; its macOS application
+lock update. Ghostty's optional Linux package comes from Nixpkgs; its macOS application
 comes from Homebrew's official cask. Home Manager controls installation and
 activation but does not change the upstream source selected by Nixpkgs.
 

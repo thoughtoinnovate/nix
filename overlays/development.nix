@@ -9,6 +9,67 @@ let
   ++ lib.optionals final.stdenv.hostPlatform.isDarwin [ "/Applications" ];
 in
 {
+  leanDevelopmentPackages = with final; [
+    jq
+    tmux
+    lazygit
+    shellcheck
+    shfmt
+  ];
+
+  homeWeavePackageGroups = {
+    python = with final; [
+      python3
+      python3Packages.debugpy
+      black
+      pyright
+      ruff
+    ];
+    data-jupyter = with final; [
+      jupyter
+      python3Packages.notebook
+      python3Packages.ipykernel
+      jupytext
+      python3Packages.pillow
+      python3Packages.cairosvg
+    ];
+    go = with final; [
+      go
+      gopls
+      delve
+      golangci-lint
+    ];
+    rust = with final; [
+      cargo
+      rustc
+      rust-analyzer
+      taplo
+    ];
+    java = with final; [
+      (final.jdkForVersion 17)
+      gradle
+      jdt-language-server
+      google-java-format
+    ];
+    web = with final; [
+      eslint
+      prettier
+      typescript-language-server
+      yaml-language-server
+      marksman
+      markdownlint-cli2
+      vscode-langservers-extracted
+      vscode-js-debug
+    ];
+    cloud = with final; [
+      awscli2
+      terraform
+      kubectl
+      minikube
+    ];
+    desktop = with final; [ vscode ];
+  };
+
   neovimDevelopmentPackages = with final; [
     bash-language-server
     black
@@ -48,18 +109,11 @@ in
     else
       final."jdk${toString jdkVersion}";
 
-  extendedDevPackages =
-    with final;
-    [
-      gradle
-      kubectl
-      lazygit
-      minikube
-      vscode
-    ]
-    ++ final.neovimDevelopmentPackages;
+  # Compatibility shells and the legacy aggregate now follow the lean
+  # development default. Toolchains are selected through package groups.
+  extendedDevPackages = final.leanDevelopmentPackages;
 
-  fullDevBasePackages = final.basePackagesWithoutJava ++ [ (final.jdkForVersion 17) ];
+  fullDevBasePackages = final.basePackagesWithoutJava;
 
   full-development-environment = prev.buildEnv {
     name = "full-development-environment";

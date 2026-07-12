@@ -1,5 +1,8 @@
 # Personal configuration profile
 
+For setup, planning, profile management, updates, and uninstall examples, see
+the public [HomeWeave quick-start guide](https://github.com/thoughtoinnovate/nix/blob/main/QUICKSTART.md).
+
 This private repository extends HomeWeave from `thoughtoinnovate/nix` (or a
 private work distribution) and its sanitized defaults. Named profiles live at
 `nix/<name>/profile.nix`; personal dotfiles live under `dotfiles/custom`.
@@ -39,7 +42,25 @@ Credentials must remain outside this repository and the Nix store.
 
 The active machine selection is stored under the Git-ignored `.state`
 directory. Add packages, shells, casks, and unfree allow-list entries to the
-selected `profile.nix`. Custom profiles may extend any existing profile.
+selected `profile.nix`. Custom profiles may extend any existing profile and
+select `packageGroups` from `python`, `data-jupyter`, `go`, `rust`, `java`,
+`web`, `cloud`, and `desktop`.
+
+Successful activations write immutable JSON receipts under
+`.state/receipts/`; inspect the latest activation with `./home-weave status`
+or `./home-weave status --json`. Manage definitions with `profile list`,
+`show`, `create`, `diff`, `switch`, and `delete`.
+
+Setup can select an existing profile or create a custom one. To preview and
+then make another existing profile active:
+
+```sh
+./home-weave plan --profile work
+./home-weave apply --profile work
+```
+
+Only a successful `apply` changes `.state/active-profile`; `plan` is read-only.
+The selected profile's own `primaryShell` is used during activation.
 
 ## Private work components
 

@@ -12,11 +12,49 @@ ASSUME_YES=false
 ALLOW_NIX_INSTALL=true
 GENERATE_ONLY=false
 TEMP_INSTALL_DIR=""
+PREVIOUS_HOME_GENERATION=""
+HOME_MANAGER_SWITCHED=false
+ACTIVATION_COMMITTED=false
+DOTFILES_CHANGED=false
+DOTFILE_SNAPSHOT_ROOT=""
+INSTALLED_CASKS_THIS_RUN=()
 
 cleanup() {
+  if "$HOME_MANAGER_SWITCHED" && ! "$ACTIVATION_COMMITTED"; then
+    if "$DOTFILES_CHANGED"; then
+      stow_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles"
+      stow --delete --no-folding --dir="$stow_root" --target="$HOME" current >/dev/null 2>&1 || true
+      rm -rf "$stow_root/current"
+      if [[ -d "$DOTFILE_SNAPSHOT_ROOT/current" ]]; then
+        mv "$DOTFILE_SNAPSHOT_ROOT/current" "$stow_root/current"
+        stow --restow --no-folding --dir="$stow_root" --target="$HOME" current >/dev/null 2>&1 || \
+          printf 'warning: automatic Stow rollback failed\n' >&2
+      fi
+    fi
+    for cask in "${INSTALLED_CASKS_THIS_RUN[@]-}"; do
+      [[ -n "$cask" ]] || continue
+      brew uninstall --cask "$cask" >/dev/null 2>&1 || \
+        printf 'warning: could not roll back Homebrew cask %s\n' "$cask" >&2
+      cask_record="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/installed-casks"
+      if [[ -f "$cask_record" ]]; then
+        grep -Fvx "$cask" "$cask_record" >"$cask_record.rollback" || true
+        mv "$cask_record.rollback" "$cask_record"
+      fi
+    done
+    if [[ -x "$PREVIOUS_HOME_GENERATION/activate" ]]; then
+      printf 'warning: restoring the previous Home Manager generation after activation failure\n' >&2
+      "$PREVIOUS_HOME_GENERATION/activate" >/dev/null || \
+        printf 'warning: automatic Home Manager rollback failed; run %s/activate\n' "$PREVIOUS_HOME_GENERATION" >&2
+    else
+      printf 'warning: removing the first Home Manager generation after activation failure\n' >&2
+      printf 'y\n' | nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- uninstall >/dev/null 2>&1 || \
+        printf 'warning: automatic removal of the failed first generation did not complete\n' >&2
+    fi
+  fi
   if [[ -n "$TEMP_INSTALL_DIR" && -d "$TEMP_INSTALL_DIR" ]]; then
     rm -rf "$TEMP_INSTALL_DIR"
   fi
+  [[ -z "$DOTFILE_SNAPSHOT_ROOT" ]] || rm -rf "$DOTFILE_SNAPSHOT_ROOT"
 }
 
 trap cleanup EXIT
@@ -117,8 +155,7 @@ esac
 
 case "$(uname -m)" in
   x86_64)
-    [[ "$OS" == "linux" ]] || fail "current Nixpkgs unstable does not support Intel macOS"
-    SYSTEM="x86_64-linux"
+    SYSTEM="x86_64-$OS"
     ;;
   arm64|aarch64)
     SYSTEM="aarch64-$OS"
@@ -212,7 +249,8 @@ if ! command -v nix >/dev/null 2>&1; then
 fi
 
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
-export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}extra-experimental-features = nix-command flakes"
+export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}extra-experimental-features = nix-command flakes
+substituters = https://cache.nixos.org/"
 
 initialize_profile_interactive() {
   local answer profile_dir remote_url origin namespace_answer
@@ -385,17 +423,38 @@ $MARKER
     let
       system = "$SYSTEM";
       username = "$USER";
-      home-manager = nix-base.inputs.home-manager;
-      pkgs = import nixpkgs {
+      packageSource = if system == "x86_64-darwin" then nix-base.inputs.nixpkgs-x86-darwin else nixpkgs;
+      home-manager = if system == "x86_64-darwin"
+        then nix-base.inputs.home-manager-x86-darwin
+        else nix-base.inputs.home-manager;
+      packageLib = packageSource.lib;
+      pkgs = import packageSource {
         inherit system;
-        overlays = [ nix-base.overlays.base ]
-          ++ nixpkgs.lib.optionals $DEVELOPMENT_ENABLED [ nix-base.overlays.development ]
+        overlays = [
+          nix-base.overlays.darwin-cache
+          nix-base.overlays.base
+          nix-base.overlays.development
+        ]
           $CUSTOM_OVERLAY;
         config.allowUnfreePredicate = pkg:
-          builtins.elem (nixpkgs.lib.getName pkg) [ $UNFREE_PACKAGES ];
+          builtins.elem (packageLib.getName pkg) [ $UNFREE_PACKAGES ];
+        config.allowUnsupportedSystem = true;
       };
+      packageGroupNames = builtins.attrNames pkgs.homeWeavePackageGroups;
+      groupFor = package:
+        let matches = builtins.filter
+          (group: builtins.elem (toString package) (map toString pkgs.homeWeavePackageGroups.\${group}))
+          packageGroupNames;
+        in if matches != [] then builtins.head matches
+          else if builtins.elem (toString package) (map toString pkgs.leanDevelopmentPackages) then "development"
+          else "base";
+      inheritedFor = group:
+        if group == "base" && "$PROFILE" != "base" then "base"
+        else if group == "development" && "$PROFILE" != "development" then "development"
+        else if group != "base" && group != "development" then "$PROFILE"
+        else null;
     in
-    {
+    rec {
       packages."$SYSTEM".home-manager = home-manager.packages."$SYSTEM".home-manager;
 
       homeConfigurations."$USER" = home-manager.lib.homeManagerConfiguration {
@@ -422,6 +481,17 @@ $MARKER
           }
         ];
       };
+
+      homeWeaveInventory."$SYSTEM" = map
+        (package: let group = groupFor package; in {
+          name = packageLib.getName package;
+          version = packageLib.getVersion package;
+          storePath = toString package;
+          source = "official NixOS package repository";
+          inherit group;
+          inheritedFrom = inheritedFor group;
+        })
+        homeConfigurations."$USER".config.home.packages;
     };
 }
 EOF
@@ -430,14 +500,76 @@ mv "$TEMP_FLAKE" "$TARGET_FLAKE"
 
 nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_DIR"
 
+preflight_activation() {
+  local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0
+  local download_bytes=0 large_build=false
+  output_file="$(mktemp)"
+  data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
+  mkdir -p "$data_root"
+  if ! nix "${NIX_FLAGS[@]}" build --dry-run --no-link \
+    "$CONFIG_DIR#homeConfigurations.\"$USER\".activationPackage" >"$output_file" 2>&1; then
+    cat "$output_file" >&2
+    if grep -Eqi 'unfree|license' "$output_file"; then
+      fail "preflight found an unfree package that is not explicitly allowed by the profile"
+    elif grep -Eqi 'unsupported|not supported on' "$output_file"; then
+      fail "preflight found a package unsupported on $SYSTEM; remove it or choose another group"
+    fi
+    fail "Nix activation preflight failed; no active state was changed"
+  fi
+  output="$(<"$output_file")"
+  printf '%s\n' "$output"
+  grep -Eqi 'database is busy|SQLITE_BUSY' "$output_file" \
+    && printf 'warning: Nix reported transient SQLite contention but continued successfully.\n' >&2
+  reporter="${HOME_WEAVE_PREFLIGHT_REPORTER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/preflight-report.sh}"
+  bash "$reporter" --input "$output_file" --output "$data_root/last-preflight.json" \
+    --system "$SYSTEM" --unfree "${UNFREE_PACKAGES:-}" || reporter_status=$?
+  if ((reporter_status == 42)); then
+    fail "Starship has no binary substitute for this Darwin lock and its local link is known to fail; update the public lock"
+  elif ((reporter_status != 0)); then
+    fail "could not parse the Nix activation preflight"
+  fi
+  download_size="$(jq -r '.downloadSize' "$data_root/last-preflight.json")"
+  closure_size="$(jq -r '.closureSize' "$data_root/last-preflight.json")"
+  download_bytes="$(jq -r '.downloadBytes' "$data_root/last-preflight.json")"
+  substitutions="$(jq -r '.substitutions[]' "$data_root/last-preflight.json")"
+  local_builds="$(jq -r '.localBuilds[]' "$data_root/last-preflight.json")"
+  local_build_count="$(grep -c . <<<"$local_builds" | tr -d ' ')"
+  if ((local_build_count > 20)) || grep -Eqi '(rustc|cargo|golang|go-[0-9]|jdk|gradle|jupyter|vscode|minikube|terraform|llvm|clang).*\.drv' <<<"$local_builds"; then
+    large_build=true
+  fi
+  printf '\nHomeWeave preflight:\n'
+  printf '  Compressed download: %s\n' "${download_size:-0 B (cached)}"
+  printf '  Expanded closure:   %s\n' "${closure_size:-0 B (cached)}"
+  printf '  Cache substitutions: %s\n' "$(grep -c . <<<"$substitutions" | tr -d ' ')"
+  printf '  Required local builds: %s\n' "$local_build_count"
+  printf '  Unfree packages: %s\n' "$(jq -r '.unfreePackages | if length == 0 then "none" else join(", ") end' "$data_root/last-preflight.json")"
+  printf '  Unsupported packages: %s\n' "$(jq -r '.unsupportedPackages | if length == 0 then "none" else join(", ") end' "$data_root/last-preflight.json")"
+  if [[ "$SYSTEM" == *-darwin && "$local_builds" == *starship-* ]]; then
+    fail "Starship has no binary substitute for this Darwin lock and its local link is known to fail; update the public nixpkgs-unstable lock"
+  fi
+  if ! "$GENERATE_ONLY" && { ((download_bytes > 1073741824)) || "$large_build"; }; then
+    if ! "$ASSUME_YES"; then
+      [[ -t 0 ]] || fail "large download or local compilation requires interactive confirmation or --yes"
+      printf 'Continue with the large download/local build? [y/N] '
+      read -r answer
+      [[ "$answer" == y || "$answer" == Y ]] || fail "activation cancelled after preflight"
+    fi
+  fi
+  rm -f "$output_file"
+}
+
+preflight_activation
+
 if "$GENERATE_ONLY"; then
   printf 'Generated %s for %s/%s (%s).\n' \
     "$CONFIG_DIR" "$PROFILE" "$SELECTED_SHELL" "$SYSTEM"
   exit 0
 fi
 
+PREVIOUS_HOME_GENERATION="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)"
 nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- \
   switch --flake "$CONFIG_DIR#$USER"
+HOME_MANAGER_SWITCHED=true
 
 export PATH="$HOME/.nix-profile/bin:$PATH"
 
@@ -472,7 +604,7 @@ compose_bundled_dotfiles() {
 install_macos_apps() {
   local cask cask_record
   [[ "$OS" == "darwin" ]] || return
-  PROFILE_CASKS="${PROFILE_CASKS:-ghostty}"
+  PROFILE_CASKS="${PROFILE_CASKS:-}"
   [[ -n "$PROFILE_CASKS" ]] || return
   if ! command -v brew >/dev/null 2>&1; then
     printf 'warning: Homebrew is unavailable; declared macOS casks were not installed.\n' >&2
@@ -484,6 +616,7 @@ install_macos_apps() {
     [[ "$cask" =~ ^[a-zA-Z0-9@+._-]+$ ]] || fail "unsafe Homebrew cask name: $cask"
     if ! brew list --cask "$cask" >/dev/null 2>&1; then
       brew install --cask "$cask"
+      INSTALLED_CASKS_THIS_RUN+=("$cask")
       mkdir -p "$(dirname "$cask_record")"
       touch "$cask_record"
       grep -Fxq "$cask" "$cask_record" || printf '%s\n' "$cask" >>"$cask_record"
@@ -491,12 +624,18 @@ install_macos_apps() {
   done < <(tr ',' '\n' <<<"$PROFILE_CASKS")
 }
 
+DOTFILE_SNAPSHOT_ROOT="$(mktemp -d)"
+if [[ -d "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles/current" ]]; then
+  cp -R "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles/current" "$DOTFILE_SNAPSHOT_ROOT/current"
+fi
 if [[ -n "$CONFIG_URL" ]]; then
   compose_profile_components
 else
   compose_bundled_dotfiles
 fi
+DOTFILES_CHANGED=true
 install_macos_apps
+ACTIVATION_COMMITTED=true
 
 case "$SELECTED_SHELL" in
   nushell) SHELL_PROGRAM="nu" ;;

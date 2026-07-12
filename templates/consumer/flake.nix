@@ -28,6 +28,7 @@
             nix-base.overlays.development
           ];
           config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
+          config.allowUnsupportedSystem = true;
         };
 
         modules = [

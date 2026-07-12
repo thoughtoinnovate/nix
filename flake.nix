@@ -2,13 +2,24 @@
   description = "Reusable cross-platform terminal and development configuration";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # The Darwin rolling branch has substantially better binary-cache coverage
+    # than the NixOS-oriented channel and is also suitable for Linux consumers.
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    # Upstream removed Intel Darwin from 26.11. Keep the final supported,
+    # security-maintained official branch solely for x86_64-darwin.
+    nixpkgs-x86-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
 
     flake-utils.url = "github:numtide/flake-utils";
 
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    home-manager-x86-darwin = {
+      url = "github:nix-community/home-manager/release-26.05";
+      inputs.nixpkgs.follows = "nixpkgs-x86-darwin";
     };
 
     nix-darwin = {
@@ -28,6 +39,18 @@
     let
       baseOverlay = import ./overlays/base.nix;
       developmentOverlay = import ./overlays/development.nix;
+      # nixpkgs-unstable's Darwin linker fix landed before its Starship output
+      # reached cache.nixos.org. Use the final supported Darwin channel's
+      # cache-backed Starship until the unstable output is substituted.
+      darwinCacheOverlay = final: prev: {
+        starship =
+          if prev.stdenv.hostPlatform.isDarwin then
+            (import inputs.nixpkgs-x86-darwin {
+              system = prev.stdenv.hostPlatform.system;
+            }).starship
+          else
+            prev.starship;
+      };
       mkHomeWeaveApp =
         {
           system,
@@ -35,11 +58,13 @@
           distributionName ? "HomeWeave",
           baseUrl ? "github:thoughtoinnovate/nix",
           profileOverlay ? null,
+          packageSource ? nixpkgs,
         }:
         let
-          appPkgs = import nixpkgs {
+          appPkgs = import packageSource {
             inherit system;
             overlays = [ baseOverlay ];
+            config.allowUnsupportedSystem = true;
           };
           extensionJson = builtins.toJSON extensions;
           wrapper = appPkgs.writeShellApplication {
@@ -66,21 +91,27 @@
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
+        "x86_64-darwin"
       ]
       (
         system:
         let
-          pkgs = import nixpkgs {
+          packageSource = if system == "x86_64-darwin" then inputs.nixpkgs-x86-darwin else nixpkgs;
+          selectedHomeManager =
+            if system == "x86_64-darwin" then inputs.home-manager-x86-darwin else inputs.home-manager;
+          pkgs = import packageSource {
             inherit system;
             overlays = [
+              darwinCacheOverlay
               baseOverlay
               developmentOverlay
             ];
             config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
+            config.allowUnsupportedSystem = true;
           };
           homeTest =
             shell: development:
-            inputs.home-manager.lib.homeManagerConfiguration {
+            selectedHomeManager.lib.homeManagerConfiguration {
               inherit pkgs;
               modules = [
                 self.homeModules.default
@@ -136,7 +167,9 @@
           };
 
           apps = {
-            home-weave = mkHomeWeaveApp { inherit system; };
+            home-weave = mkHomeWeaveApp {
+              inherit system packageSource;
+            };
             setup = {
               type = "app";
               program = "${
@@ -179,6 +212,19 @@
               assert pkgs ? terminal-tools;
               assert pkgs ? development-tools;
               assert pkgs ? mkJava21DevShell;
+              assert
+                let
+                  leanNames = map nixpkgs.lib.getName pkgs.leanDevelopmentPackages;
+                in
+                builtins.all (name: !(builtins.elem name leanNames)) [
+                  "jupyter"
+                  "vscode"
+                  "jdk"
+                  "go"
+                  "rustc"
+                  "terraform"
+                  "kubectl"
+                ];
               pkgs.runCommand "overlay-evaluation" { } ''
                 touch $out
               '';
@@ -242,6 +288,22 @@
                     ${./home-weave.sh} ${./templates/profile}
                   touch $out
                 '';
+
+            preflight-parser =
+              pkgs.runCommand "preflight-parser-tests"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    coreutils
+                    gnugrep
+                    gnused
+                    jq
+                  ];
+                }
+                ''
+                  bash ${./tests/test-preflight-parser.sh} ${./lib/preflight-report.sh}
+                  touch $out
+                '';
           };
         }
       )
@@ -250,6 +312,7 @@
         default = baseOverlay;
         base = baseOverlay;
         development = developmentOverlay;
+        darwin-cache = darwinCacheOverlay;
       };
 
       homeModules = {
@@ -265,6 +328,81 @@
 
       lib.dotfiles.path = ./dotfiles;
       lib.mkHomeWeaveApp = mkHomeWeaveApp;
+      lib.packageCatalog = {
+        base = [
+          "clang"
+          "fd"
+          "git"
+          "gnumake"
+          "home-weave-cli"
+          "neovim"
+          "nodejs"
+          "python3"
+          "ripgrep"
+          "starship"
+          "stow"
+          "unzip"
+        ];
+        development = [
+          "jq"
+          "lazygit"
+          "shellcheck"
+          "shfmt"
+          "tmux"
+        ];
+        groups = {
+          python = [
+            "python3"
+            "python3Packages.debugpy"
+            "black"
+            "pyright"
+            "ruff"
+          ];
+          data-jupyter = [
+            "jupyter"
+            "python3Packages.notebook"
+            "python3Packages.ipykernel"
+            "jupytext"
+            "python3Packages.pillow"
+            "python3Packages.cairosvg"
+          ];
+          go = [
+            "go"
+            "gopls"
+            "delve"
+            "golangci-lint"
+          ];
+          rust = [
+            "cargo"
+            "rustc"
+            "rust-analyzer"
+            "taplo"
+          ];
+          java = [
+            "jdk17"
+            "gradle"
+            "jdt-language-server"
+            "google-java-format"
+          ];
+          web = [
+            "eslint"
+            "prettier"
+            "typescript-language-server"
+            "yaml-language-server"
+            "marksman"
+            "markdownlint-cli2"
+            "vscode-langservers-extracted"
+            "vscode-js-debug"
+          ];
+          cloud = [
+            "awscli2"
+            "terraform"
+            "kubectl"
+            "minikube"
+          ];
+          desktop = [ "vscode" ];
+        };
+      };
 
       templates.default = {
         path = ./templates/consumer;

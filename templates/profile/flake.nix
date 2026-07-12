@@ -20,6 +20,7 @@
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
+        "x86_64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       profileEntries = builtins.readDir ./nix;
@@ -31,6 +32,7 @@
         extends = null;
         shells = [ "zsh" ];
         primaryShell = "zsh";
+        packageGroups = [ ];
         nixPackages = [ ];
         homebrewCasks = [ ];
         allowUnfree = [ ];
@@ -51,6 +53,7 @@
           // current
           // {
             nixPackages = lib.unique (parent.nixPackages ++ (current.nixPackages or [ ]));
+            packageGroups = lib.unique (parent.packageGroups ++ (current.packageGroups or [ ]));
             homebrewCasks = lib.unique (parent.homebrewCasks ++ (current.homebrewCasks or [ ]));
             allowUnfree = lib.unique (parent.allowUnfree ++ (current.allowUnfree or [ ]));
             development =
@@ -72,6 +75,7 @@
           homeWeave.base = {
             enable = true;
             shells = profile.shells;
+            packageGroups = profile.packageGroups;
           };
           homeWeave.development.enable = profile.development;
           home.packages = map packageFor profile.nixPackages;

@@ -25,20 +25,13 @@ let
       export HOME_WEAVE_PROFILE_TEMPLATE="''${HOME_WEAVE_PROFILE_TEMPLATE:-${../templates/profile}}"
       export HOME_WEAVE_BUNDLED_DOTFILES="''${HOME_WEAVE_BUNDLED_DOTFILES:-${../dotfiles}}"
       export HOME_WEAVE_PACKAGE_PREVIEW="''${HOME_WEAVE_PACKAGE_PREVIEW:-${../lib/package-preview.sh}}"
+      export HOME_WEAVE_NATIVE_PROVIDER="''${HOME_WEAVE_NATIVE_PROVIDER:-${../lib/native-provider.sh}}"
+      export HOME_WEAVE_PREFLIGHT_REPORTER="''${HOME_WEAVE_PREFLIGHT_REPORTER:-${../lib/preflight-report.sh}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
     '';
   };
 
-  neovimPython = final.python3.withPackages (pythonPackages: [
-    pythonPackages.cairosvg
-    pythonPackages.debugpy
-    pythonPackages.ipykernel
-    pythonPackages."jupyter-client"
-    pythonPackages.jupytext
-    pythonPackages.notebook
-    pythonPackages.pillow
-    pythonPackages.pynvim
-  ]);
+  neovimPython = final.python3.withPackages (pythonPackages: [ pythonPackages.pynvim ]);
 
   neovimCorePackages = with final; [
     clang
@@ -57,10 +50,8 @@ let
       git
       homeWeaveCli
       neovim
-      nerd-fonts.fira-code
       starship
       stow
-      wget
     ]
     ++ neovimCorePackages;
 
@@ -73,7 +64,7 @@ let
 
   commonTerminalPackages = commonToolPackages ++ builtins.attrValues shellPackages;
 
-  platformTerminalPackages = lib.optionals isLinux [ final.ghostty ];
+  platformTerminalPackages = [ ];
   baseJdk = if isLinux then final.corretto21 else final.jdk21;
   pathsToLink = [
     "/bin"
@@ -105,7 +96,7 @@ in
 
   development-tools = prev.buildEnv {
     name = "development-tools";
-    paths = final.basePackages;
+    paths = final.basePackagesWithoutJava;
     inherit pathsToLink;
   };
 

@@ -3,7 +3,8 @@
   shells = [ "zsh" ];
   primaryShell = "zsh";
   development = true;
+  packageGroups = [ ];
   nixPackages = [ ];
   homebrewCasks = [ ];
-  allowUnfree = [ "vscode" ];
+  allowUnfree = [ ];
 }

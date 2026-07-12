@@ -2,6 +2,11 @@
 
 set -Eeuo pipefail
 
+# HomeWeave never opts into third-party binary caches. Users may still manage
+# daemon-wide trust policy themselves, but every HomeWeave Nix invocation
+# requests only the official cache, whose signing key is Nix's built-in default.
+export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}substituters = https://cache.nixos.org/"
+
 COMMAND="${1:-help}"
 [[ $# -eq 0 ]] || shift
 
@@ -19,7 +24,9 @@ EXTENDS="base"
 PRIMARY_SHELL=""
 SELECTED_SHELLS=""
 REQUESTED_PACKAGES=()
+REQUESTED_GROUPS=()
 MANAGED_PROVIDER_IDS=""
+DEFAULT_PACKAGE_IDS=""
 REMOTE_URL=""
 RESTORE_MODE=""
 NO_GIT=false
@@ -29,6 +36,9 @@ UNINSTALL_KEEP_DOTFILES=false
 UNINSTALL_KEEP_HOME_MANAGER=false
 UNINSTALL_NO_RESTORE=false
 DRY_RUN=false
+STATUS_JSON=false
+UNINSTALL_ALL=false
+UNINSTALL_NUKE=false
 TIMESTAMP=""
 OLD_ROOT=""
 ADOPTION_BACKUP_ROOT=""
@@ -51,10 +61,12 @@ Usage:
   home-weave plan [--root PATH] [--profile NAME]
   home-weave apply [--root PATH] [--profile NAME]
   home-weave update [--root PATH]
+  home-weave profile list|show|create|diff|switch|delete ...
+  home-weave status [--profile NAME] [--json]
   home-weave restore [GIT_URL] [--merge|--override] [--root PATH]
   home-weave sync [--root PATH]
   home-weave uninstall [options]
-  home-weave provider list|inventory|search|install|update|remove ...
+  home-weave provider list|inventory|search|install|update|remove|status ...
   home-weave extension list|NAME [arguments...]
 
 Setup options:
@@ -63,14 +75,21 @@ Setup options:
   --extends NAME          Parent for a new custom profile (default: base)
   --shell NAME[,NAME...]  Shells to install; the first is primary
   --package NAME          Add a Nix package; may be repeated
+  --group NAME            Add a package group; may be repeated
   --remote URL            Existing private Git remote
   --apply                 Activate after generating the repository
   --no-apply              Generate only
   --no-git                Do not initialize Git
   --yes                   Confirm safe non-interactive defaults
 
+Profile package groups:
+  python, data-jupyter, go, rust, java, web, cloud, desktop
+
 Uninstall options:
-  --remove-casks          Remove only casks recorded as installed by HomeWeave
+  --profile NAME          Switch an active profile to its parent
+  --all                   Remove every active HomeWeave effect; keep the root
+  --nuke                  Run --all, then delete only the HomeWeave root
+  --remove-casks          Remove casks/provider apps recorded as HomeWeave-installed
   --archive-root          Move the repository to a timestamped sibling directory
   --keep-dotfiles         Leave managed Stow links active
   --keep-home-manager     Leave Home Manager packages and generations active
@@ -91,6 +110,33 @@ confirm() {
   printf '%s [y/N] ' "$prompt"
   read -r answer
   [[ "$answer" == "y" || "$answer" == "Y" ]]
+}
+
+LOCK_DIR=""
+acquire_operation_lock() {
+  local owner=""
+  LOCK_DIR="${ROOT}.operation-lock"
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    [[ ! -r "$LOCK_DIR/pid" ]] || owner="$(<"$LOCK_DIR/pid")"
+    if [[ "$owner" =~ ^[0-9]+$ ]] && ! kill -0 "$owner" 2>/dev/null; then
+      warn "removing stale HomeWeave operation lock from process $owner"
+      rm -rf "$LOCK_DIR"
+      mkdir "$LOCK_DIR" || fail "could not acquire operation lock: $LOCK_DIR"
+    else
+      fail "another HomeWeave operation is using this repository${owner:+ (process $owner)}"
+    fi
+  fi
+  printf '%s\n' "$$" >"$LOCK_DIR/pid"
+  printf '%s\n' "$COMMAND" >"$LOCK_DIR/command"
+  trap release_operation_lock EXIT
+}
+
+release_operation_lock() {
+  [[ -n "$LOCK_DIR" && -d "$LOCK_DIR" ]] || return 0
+  if [[ ! -r "$LOCK_DIR/pid" || "$(<"$LOCK_DIR/pid")" == "$$" ]]; then
+    rm -rf "$LOCK_DIR"
+  fi
+  LOCK_DIR=""
 }
 
 normalize_root() {
@@ -139,6 +185,7 @@ parse_common_options() {
         shift 2
         ;;
       --package) [[ $# -ge 2 ]] || fail "--package requires a name"; REQUESTED_PACKAGES+=("$2"); shift 2 ;;
+      --group) [[ $# -ge 2 ]] || fail "--group requires a name"; REQUESTED_GROUPS+=("$2"); shift 2 ;;
       --remote) [[ $# -ge 2 ]] || fail "--remote requires a URL"; REMOTE_URL="$2"; shift 2 ;;
       --apply) APPLY_NOW=true; shift ;;
       --no-apply) APPLY_NOW=false; shift ;;
@@ -149,6 +196,9 @@ parse_common_options() {
       --keep-home-manager) UNINSTALL_KEEP_HOME_MANAGER=true; shift ;;
       --no-restore) UNINSTALL_NO_RESTORE=true; shift ;;
       --dry-run) DRY_RUN=true; shift ;;
+      --json) STATUS_JSON=true; shift ;;
+      --all) UNINSTALL_ALL=true; shift ;;
+      --nuke) UNINSTALL_NUKE=true; UNINSTALL_ALL=true; shift ;;
       --yes|-y) ASSUME_YES=true; shift ;;
       --merge) RESTORE_MODE=merge; shift ;;
       --override) RESTORE_MODE=override; shift ;;
@@ -253,12 +303,21 @@ commit_root_replacement() {
 write_state() {
   mkdir -p "$ROOT/.state"
   printf '%s\n' "$PROFILE" >"$ROOT/.state/active-profile"
+  rm -f "$ROOT/.state/selected-profile"
+  printf '%s\n' "$PRIMARY_SHELL" >"$ROOT/.state/primary-shell"
+}
+
+write_pending_state() {
+  mkdir -p "$ROOT/.state"
+  printf '%s\n' "$PROFILE" >"$ROOT/.state/selected-profile"
   printf '%s\n' "$PRIMARY_SHELL" >"$ROOT/.state/primary-shell"
 }
 
 read_state() {
   [[ -n "$PROFILE" || ! -r "$ROOT/.state/active-profile" ]] \
     || PROFILE="$(<"$ROOT/.state/active-profile")"
+  [[ -n "$PROFILE" || ! -r "$ROOT/.state/selected-profile" ]] \
+    || PROFILE="$(<"$ROOT/.state/selected-profile")"
   [[ -n "$PRIMARY_SHELL" || ! -r "$ROOT/.state/primary-shell" ]] \
     || PRIMARY_SHELL="$(<"$ROOT/.state/primary-shell")"
   PROFILE="${PROFILE:-base}"
@@ -293,6 +352,7 @@ choose_profile() {
   extends = "$parent";
   shells = [ "zsh" ];
   primaryShell = "zsh";
+  packageGroups = [ ];
   nixPackages = [ ];
   homebrewCasks = [ ];
   allowUnfree = [ ];
@@ -331,6 +391,7 @@ ensure_profile() {
   extends = "$EXTENDS";
   shells = [ "zsh" ];
   primaryShell = "zsh";
+  packageGroups = [ ];
   nixPackages = [ ];
   homebrewCasks = [ ];
   allowUnfree = [ ];
@@ -395,6 +456,34 @@ add_profile_packages() {
   temporary="$file.tmp.$$"
   sed -E "s/nixPackages = \[[^]]*\];/nixPackages = [$package_values ];/" "$file" >"$temporary"
   mv "$temporary" "$file"
+}
+
+add_profile_groups() {
+  local file="$ROOT/nix/$PROFILE/profile.nix" temporary group group_values=""
+  for group in "$@"; do
+    case "$group" in
+      python|data-jupyter|go|rust|java|web|cloud|desktop) ;;
+      *) fail "unknown package group: $group" ;;
+    esac
+    group_values+=" \"$group\""
+  done
+  [[ -n "$group_values" ]] || return 0
+  temporary="$file.tmp.$$"
+  sed -E "s/packageGroups = \[[^]]*\];/packageGroups = [$group_values ];/" "$file" >"$temporary"
+  mv "$temporary" "$file"
+}
+
+show_package_groups() {
+  local catalog group count packages
+  catalog="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "$BASE_URL#lib.packageCatalog.groups" 2>/dev/null || printf '{}')"
+  [[ "$(jq -r 'type' <<<"$catalog")" == object ]] || return 0
+  printf '\nSelectable package groups (exact download and closure sizes appear in plan):\n'
+  while IFS= read -r group; do
+    count="$(jq -r --arg group "$group" '.[$group] | length' <<<"$catalog")"
+    packages="$(jq -r --arg group "$group" '.[$group] | join(", ")' <<<"$catalog")"
+    printf '  %-13s %2s packages  %s\n' "$group" "$count" "$packages"
+  done < <(jq -r 'keys[]' <<<"$catalog")
 }
 
 add_profile_unfree() {
@@ -490,16 +579,74 @@ enrich_nixpkgs_results() {
   printf '%s' "$enriched"
 }
 
+load_default_package_ids() {
+  local catalog profiles profile_metadata development
+  catalog="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "$BASE_URL#lib.packageCatalog" 2>/dev/null || printf '{}')"
+  profiles="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "path:$ROOT#lib.setup.profiles" 2>/dev/null || printf '{}')"
+  profile_metadata="$(jq -c --arg profile "$PROFILE" '.[$profile] // {}' <<<"$profiles")"
+  development="$(jq -r '.development // false' <<<"$profile_metadata")"
+  DEFAULT_PACKAGE_IDS="$(jq -rn \
+    --argjson catalog "$catalog" \
+    --argjson profile "$profile_metadata" \
+    --arg development "$development" '
+      (
+        ($catalog.base // [])
+        + (if $development == "true" then ($catalog.development // []) else [] end)
+        + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
+        + ($profile.shells // [])
+        + ($profile.nixPackages // [])
+      )
+      | unique[]
+    ')"
+}
+
+preview_final_package_selection() {
+  local metadata="$1" package details version upstream maintainers author
+  shift
+  printf '\nFinal package selection:\n'
+  printf '%-38s %-12s %-24s %-20s %s\n' \
+    'PACKAGE' 'VERSION' 'UPSTREAM/AUTHOR' 'PACKAGE TYPE' 'PUBLISHER'
+  printf '%-38s %-12s %-24s %-20s %s\n' \
+    '-------' '-------' '---------------' '------------' '---------'
+  for package in "$@"; do
+    details="$(jq -c --arg package "$package" '.[$package] // {}' <<<"$metadata")"
+    version="$(jq -r '.version // "profile default"' <<<"$details")"
+    upstream="$(jq -r '.homepage // "Nixpkgs"' <<<"$details")"
+    author="$upstream"
+    if [[ "$author" == http://* || "$author" == https://* ]]; then
+      author="${author#*://}"
+      author="${author%%/*}"
+      if [[ "$author" == github.com && "$upstream" == *github.com/* ]]; then
+        author="${upstream#*github.com/}"
+        author="github:${author%%/*}"
+      fi
+    fi
+    printf '%-38.38s %-12.12s %-24.24s %-20.20s \033[31m%s\033[0m\n' \
+      "$package" "$version" "$author" '🏢 Official Nixpkgs' '🔴 Unverified upstream'
+    maintainers="$(jq -r '(.maintainers // []) | join(", ")' <<<"$details")"
+    [[ -z "$maintainers" ]] || printf '  Nix maintainers: %s\n' "$maintainers"
+  done
+}
+
 select_optional_packages() {
-  local selected="" query="" pinned results searched="" package results_file result_count author display
+  local selected="" query="" pinned="" results searched="" query_selected package results_file result_count author display
+  local search_rows already_included
+  local selection_metadata='{}' normalized_metadata selected_count
   local selection token index=0 valid available_packages=() package_list=() tokens=()
   [[ -t 0 ]] || return 0
+  load_default_package_ids
   printf '\nOptional Nix packages:\n'
   for package in bat eza jq tmux htop awscli2 terraform kubectl vscode; do
-    if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
+    if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS" \
+      && ! grep -Fxq "$package" <<<"$DEFAULT_PACKAGE_IDS"; then
       available_packages+=("$package")
     fi
   done
+  if grep -Eq '^(kubectl|vscode)$' <<<"$DEFAULT_PACKAGE_IDS"; then
+    printf 'Packages already supplied by inherited profiles or selected groups are omitted from this list.\n'
+  fi
   if command -v gum >/dev/null 2>&1; then
     selected="$(printf '%s\n' "${available_packages[@]}" \
       | gum choose --no-limit --ordered --height=12 --show-help \
@@ -545,10 +692,16 @@ select_optional_packages() {
     selected="$(printf '%s\n' "${package_list[@]}")"
     printf 'Selected optional packages: %s\n' "$(IFS=', '; printf '%s' "${package_list[*]}")"
   fi
-  printf 'Search the pinned official Nixpkgs repository? Enter a term or leave blank: '
-  read -r query
-  if [[ -n "$query" ]]; then
-    if pinned="$(pinned_nixpkgs_ref)"; then
+  while :; do
+    printf 'Search pinned Nixpkgs (enter another keyword, or leave blank to finish): '
+    read -r query
+    [[ -n "$query" ]] || break
+    if [[ -z "$pinned" ]]; then
+      if ! pinned="$(pinned_nixpkgs_ref)"; then
+        warn "could not resolve the pinned Nixpkgs input; package search was skipped"
+        break
+      fi
+    fi
       results_file="$(mktemp)"
       if run_with_spinner "Searching pinned Nixpkgs for '$query'..." "$results_file" \
         nix --extra-experimental-features 'nix-command flakes' search "$pinned" "$query" --json; then
@@ -581,8 +734,25 @@ select_optional_packages() {
             results="$(jq 'to_entries | .[:50] | from_entries' <<<"$results")"
           fi
           results="$(enrich_nixpkgs_results "$pinned" "$results")"
-          printf 'Official status is not inferred; inspect the upstream URL and Nix maintainers.\n'
-          searched="$(jq -r '
+          normalized_metadata="$(jq -c '
+            to_entries
+            | map({key: (.key | split(".") | .[2:] | join(".")), value: .value})
+            | from_entries
+          ' <<<"$results")"
+          selection_metadata="$(jq -cn \
+            --argjson existing "$selection_metadata" \
+            --argjson incoming "$normalized_metadata" \
+            '$existing * $incoming')"
+          printf 'Repository trust: official NixOS package repository. Upstream publisher identity remains unverified.\n'
+          already_included="$(jq -r 'keys[] | split(".") | .[2:] | join(".")' <<<"$results" \
+            | while IFS= read -r package; do
+                grep -Fxq "$package" <<<"$DEFAULT_PACKAGE_IDS" && printf '%s\n' "$package"
+              done)"
+          if [[ -n "$already_included" ]]; then
+            printf 'Already included by profile %q (not added again): %s\n' \
+              "$PROFILE" "$(paste -sd, <<<"$already_included")"
+          fi
+          search_rows="$(jq -r '
               to_entries[]
               | [
                   (.key | split(".") | .[2:] | join(".")),
@@ -598,7 +768,8 @@ select_optional_packages() {
               | @tsv
             ' <<<"$results" \
             | while IFS=$'\t' read -r package version upstream maintainers license description; do
-                if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
+                if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS" \
+                  && ! grep -Fxq "$package" <<<"$DEFAULT_PACKAGE_IDS"; then
                   author="$upstream"
                   if [[ "$author" == http://* || "$author" == https://* ]]; then
                     author="${author#*://}"
@@ -609,29 +780,43 @@ select_optional_packages() {
                     fi
                   fi
                   display="$(printf '%-38.38s %-11.11s %-22.22s %-19.19s ' \
-                    "$package" "$version" "$author" '🧩 Community')"
-                  display+=$'\033[31m🔴 Unverified\033[0m'
+                    "$package" "$version" "$author" '🏢 Official Nixpkgs')"
+                  display+=$'\033[31m🔴 Upstream unverified\033[0m'
                   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                     "$display" "$package" "$version" "$upstream" "$maintainers" \
-                    "community" "unverified" "unknown" "$license" "$description"
+                    "official NixOS package repository" "unverified" "Nixpkgs" "$license" "$description"
                 fi
-              done \
-            | fzf --multi --ansi --delimiter=$'\t' --with-nth=1 \
+              done)"
+          if [[ -n "$search_rows" ]]; then
+            query_selected="$(printf '%s\n' "$search_rows" \
+              | fzf --multi --ansi --delimiter=$'\t' --with-nth=1 \
                 --bind='space:toggle,tab:toggle+down,shift-tab:toggle+up' \
                 --marker='✓ ' --pointer='›' --info=inline-right \
                 --header='PACKAGE                                VERSION     UPSTREAM/AUTHOR        PACKAGE TYPE        PUBLISHER' \
                 --header-first \
                 --preview="bash '$PACKAGE_PREVIEW' {}" --preview-window='down,45%,wrap' \
                 --prompt='SPACE/TAB select • ENTER confirm > ' \
-            | cut -f2 || true)"
+              | cut -f2 || true)"
+          else
+            query_selected=""
+          fi
+          if [[ -n "$query_selected" ]]; then
+            searched+="$query_selected"$'\n'
+            selected_count="$(printf '%s\n%s\n' "$selected" "$searched" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
+            printf 'Accumulated package selections: %s\n' "$selected_count"
+          else
+            printf 'No packages were selected for %q. You can search another keyword.\n' "$query"
+          fi
         fi
       fi
-    else
-      warn "could not resolve the pinned Nixpkgs input; package search was skipped"
-    fi
-  fi
+  done
   mapfile -t package_list < <(printf '%s\n%s\n' "$selected" "$searched" | sed '/^$/d' | sort -u)
   if ((${#package_list[@]} > 0)); then
+    preview_final_package_selection "$selection_metadata" "${package_list[@]}"
+    if ! confirm "Add all displayed packages to profile '$PROFILE'?"; then
+      printf 'Package selections were discarded.\n'
+      return 0
+    fi
     add_profile_packages "${package_list[@]}"
     for package in "${package_list[@]}"; do
       if [[ "$package" == vscode ]]; then
@@ -642,6 +827,15 @@ select_optional_packages() {
         fi
       fi
     done
+  fi
+}
+
+load_builtin_provider() {
+  if [[ -n "${HOME_WEAVE_NATIVE_PROVIDER:-}" && -x "$HOME_WEAVE_NATIVE_PROVIDER" ]] \
+    && ! jq -e 'any(.[]; .name == "native-official")' >/dev/null <<<"$EXTENSIONS_JSON"; then
+    EXTENSIONS_JSON="$(jq -cn --argjson extensions "$EXTENSIONS_JSON" --arg executable "$HOME_WEAVE_NATIVE_PROVIDER" '
+      $extensions + [{schemaVersion: 1, name: "native-official", executable: $executable,
+        capabilities: ["inventory", "search", "install", "update", "remove", "status"]}]')"
   fi
 }
 
@@ -660,7 +854,7 @@ show_provider_inventory() {
       jq -r --arg provider "$(jq -r '.name' <<<"$provider")" \
         '.items[]
           | select(.installed == true)
-          | "  [\($provider)] \(.name) \(.version // "") — Publisher: \(.publisher // "not declared") \(if .publisherVerified == true then "🟢 Verified" else "🔴 Unverified" end) • \(if .official == true then "🏢 Official" else "🧩 Provider-managed" end)"' \
+          | "  [\($provider)] \(.name) \(.version // "") — Repository: \(.repositoryTrust // (if .official == true then "official package repository" else "provider-declared repository" end)) • Publisher: \(.publisher // "not declared") \(if .publisherVerified == true then "🟢 Verified" else "🔴 Unverified" end)"' \
         <<<"$output"
     else
       warn "provider inventory failed: $(jq -r '.name' <<<"$provider")"
@@ -793,22 +987,231 @@ initialize_git() {
   fi
 }
 
+profile_metadata() {
+  nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "path:$ROOT#lib.setup.profiles"
+}
+
+record_receipt() {
+  local receipts="$ROOT/.state/receipts" timestamp receipt temporary previous profiles system revision
+  local inventory='[]' preflight='{}' dotfiles='[]' casks='[]' providers='[]' parent_chain='[]' cursor parent
+  local current_generation previous_generation changes
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  receipt="$receipts/${timestamp//:/-}.json"
+  temporary="$receipt.tmp.$$"
+  mkdir -p "$receipts"
+  profiles="$(profile_metadata)"
+  system="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --impure --raw --expr builtins.currentSystem)"
+  if [[ "$system" == x86_64-darwin ]]; then
+    revision="$(jq -r '.nodes["nixpkgs-x86-darwin"].locked.rev // "unknown"' "$ROOT/flake.lock" 2>/dev/null || printf unknown)"
+  else
+    revision="$(jq -r '.nodes.nixpkgs.locked.rev // "unknown"' "$ROOT/flake.lock" 2>/dev/null || printf unknown)"
+  fi
+  inventory="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "path:$ROOT/.state/generated#homeWeaveInventory.$system" 2>/dev/null || printf '[]')"
+  [[ ! -r "$ROOT/.state/last-preflight.json" ]] || preflight="$(<"$ROOT/.state/last-preflight.json")"
+  if [[ -d "$ROOT/.state/dotfiles/current" ]]; then
+    dotfiles="$(find "$ROOT/.state/dotfiles/current" -mindepth 1 \( -type f -o -type l \) -print \
+      | sed "s|^$ROOT/.state/dotfiles/current/||" \
+      | jq -Rsc --arg home "$HOME" --arg source "$ROOT/.state/dotfiles/current" \
+        'split("\n") | map(select(length > 0) | {destination: ($home + "/" + .), source: ($source + "/" + .), sourceLayer: "composed"})')"
+  fi
+  if [[ -s "$ROOT/.state/installed-casks" ]]; then
+    casks="$(jq -Rsc 'split("\n") | map(select(length > 0) | {id: ., provider: "homebrew", repositoryTrust: "official Homebrew repository"})' \
+      <"$ROOT/.state/installed-casks")"
+  fi
+  if [[ -s "$ROOT/.state/provider-installations.tsv" ]]; then
+    providers="$(jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") |
+      {provider: .[0], id: .[1], repositoryTrust: "provider-declared official repository"})' \
+      <"$ROOT/.state/provider-installations.tsv")"
+  fi
+  cursor="$PROFILE"
+  while :; do
+    parent="$(jq -r --arg profile "$cursor" '.[$profile].extends // empty' <<<"$profiles")"
+    [[ -n "$parent" ]] || break
+    parent_chain="$(jq -cn --argjson chain "$parent_chain" --arg parent "$parent" '$chain + [$parent]')"
+    cursor="$parent"
+  done
+  current_generation="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)"
+  previous_generation="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager-1-link" 2>/dev/null || true)"
+  previous=""
+  [[ ! -L "$receipts/latest" ]] || previous="$(readlink -f "$receipts/latest" 2>/dev/null || true)"
+  changes="$(jq -cn \
+    --argjson packages "$inventory" --argjson dotfiles "$dotfiles" \
+    --slurpfile old "${previous:-/dev/null}" '
+      ($old[0] // {packages: [], dotfiles: []}) as $previous
+      | ($packages | map(.name)) as $newPackages
+      | ($previous.packages | map(.name)) as $oldPackages
+      | ($dotfiles | map(.destination)) as $newDots
+      | ($previous.dotfiles | map(.destination)) as $oldDots
+      | {
+          added: (($newPackages - $oldPackages) + ($newDots - $oldDots)),
+          removed: (($oldPackages - $newPackages) + ($oldDots - $newDots)),
+          retained: (($newPackages - ($newPackages - $oldPackages)) + ($newDots - ($newDots - $oldDots))),
+          changed: [ $packages[] as $new | $previous.packages[]? | select(.name == $new.name and (.storePath != $new.storePath)) | $new.name ]
+        }')"
+  jq -n \
+    --arg timestamp "$timestamp" --arg profile "$PROFILE" --argjson parentChain "$parent_chain" \
+    --arg system "$system" --arg shell "$PRIMARY_SHELL" --arg revision "$revision" \
+    --argjson packages "$inventory" --argjson preflight "$preflight" \
+    --argjson casks "$casks" --argjson providers "$providers" --argjson dotfiles "$dotfiles" --argjson changes "$changes" \
+    --arg currentGeneration "$current_generation" --arg previousGeneration "$previous_generation" \
+    '{schemaVersion: 1, timestamp: $timestamp, activeProfile: $profile,
+      parentChain: $parentChain, system: $system, shell: $shell, nixpkgsRevision: $revision,
+      packages: $packages, build: $preflight,
+      applications: {homebrew: $casks, native: [], providers: $providers}, dotfiles: $dotfiles,
+      changes: $changes,
+      rollback: {currentHomeManagerGeneration: $currentGeneration,
+        previousHomeManagerGeneration: $previousGeneration, previousStowGeneration: "dotfiles/current.previous"}}' \
+    >"$temporary"
+  mv "$temporary" "$receipt"
+  ln -sfn "$(basename "$receipt")" "$receipts/latest"
+  printf 'Activation receipt: %s\n' "$receipt"
+  jq -r '
+    "Installed packages:",
+    (.packages[] | "  \(.name) \(.version) [\(.group // "profile")] \(.storePath) — \(.source)"),
+    "Managed applications:",
+    (.applications[] | .[] | "  \(.provider // "native"): \(.id // .name)"),
+    "Managed dotfiles:",
+    (.dotfiles[] | "  \(.destination) <- \(.source) [\(.sourceLayer)]"),
+    "Changes: +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) retained \(.changes.retained | length)",
+    "Rollback Home Manager generation: \(.rollback.previousHomeManagerGeneration // "none")"' "$receipt"
+}
+
+status_command() {
+  local receipt="" candidate
+  if [[ -n "$PROFILE" ]]; then
+    validate_name "$PROFILE"
+    while IFS= read -r candidate; do
+      if [[ "$(jq -r '.activeProfile' "$candidate")" == "$PROFILE" ]]; then receipt="$candidate"; break; fi
+    done < <(find "$ROOT/.state/receipts" -maxdepth 1 -type f -name '*.json' -print 2>/dev/null | sort -r)
+  elif [[ -L "$ROOT/.state/receipts/latest" ]]; then
+    receipt="$(readlink -f "$ROOT/.state/receipts/latest")"
+  fi
+  if [[ -z "$receipt" || ! -r "$receipt" ]]; then
+    if "$STATUS_JSON"; then
+      jq -n --arg profile "${PROFILE:-}" '{installed: false, activeProfile: (if $profile == "" then null else $profile end)}'
+    else
+      printf 'HomeWeave has no successful activation receipt%s.\n' "${PROFILE:+ for profile $PROFILE}"
+    fi
+    return
+  fi
+  if "$STATUS_JSON"; then cat "$receipt"; return; fi
+  jq -r '
+    "HomeWeave status",
+    "  Active profile: \(.activeProfile)",
+    "  Parent chain:   \(.parentChain | if length == 0 then "none" else join(" -> ") end)",
+    "  System:         \(.system)",
+    "  Shell:          \(.shell)",
+    "  Applied:        \(.timestamp)",
+    "  Nixpkgs:        \(.nixpkgsRevision)",
+    "  Packages:       \(.packages | length)",
+    "  Managed apps:   \([.applications[] | length] | add)",
+    "  Managed files:  \(.dotfiles | length)",
+    "  Changes:        +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) =\(.changes.retained | length)",
+    "  Rollback:       \(.rollback.previousHomeManagerGeneration // "none")"' "$receipt"
+}
+
+profile_command() {
+  local action="${POSITIONAL_ARGS[0]:-list}" name="${POSITIONAL_ARGS[1]:-}" profiles active parent children file
+  local current_json target_json field catalog old_packages new_packages
+  [[ -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
+  profiles="$(profile_metadata)"
+  active=""
+  [[ ! -r "$ROOT/.state/active-profile" ]] || active="$(<"$ROOT/.state/active-profile")"
+  case "$action" in
+    list)
+      jq -r --arg active "$active" 'to_entries[] | (if .key == $active then "* " else "  " end) + .key + (if .value.extends == null then "" else " (extends " + .value.extends + ")" end)' <<<"$profiles"
+      ;;
+    show)
+      [[ -n "$name" ]] || fail "profile show requires a name"; validate_name "$name"
+      jq -e --arg name "$name" '.[$name]' <<<"$profiles" || fail "profile does not exist: $name"
+      ;;
+    create)
+      [[ -n "$name" ]] || fail "profile create requires a name"; validate_name "$name"; validate_name "$EXTENDS"
+      [[ -z "$(jq -r --arg name "$name" '.[$name] // empty' <<<"$profiles")" ]] || fail "profile already exists: $name"
+      [[ -n "$(jq -r --arg name "$EXTENDS" '.[$name] // empty' <<<"$profiles")" ]] || fail "parent profile does not exist: $EXTENDS"
+      mkdir -p "$ROOT/nix/$name"
+      file="$ROOT/nix/$name/profile.nix"
+      {
+        printf '{\n  extends = "%s";\n' "$EXTENDS"
+        printf '  shells = [ "zsh" ];\n  primaryShell = "zsh";\n'
+        printf '  packageGroups = [ ];\n  nixPackages = [ ];\n  homebrewCasks = [ ];\n  allowUnfree = [ ];\n}\n'
+      } >"$file"
+      printf 'Created profile %s extending %s.\n' "$name" "$EXTENDS"
+      ;;
+    diff)
+      [[ -n "$name" ]] || fail "profile diff requires a name"; validate_name "$name"
+      target_json="$(jq -ce --arg name "$name" '.[$name]' <<<"$profiles")" || fail "profile does not exist: $name"
+      current_json="$(jq -c --arg name "${active:-base}" '.[$name] // {}' <<<"$profiles")"
+      printf 'Profile diff: %s -> %s\n' "${active:-none}" "$name"
+      catalog="$(nix --extra-experimental-features 'nix-command flakes' eval --json "$BASE_URL#lib.packageCatalog")"
+      old_packages="$(jq -cn --argjson profile "$current_json" --argjson catalog "$catalog" '
+        (($catalog.base // []) + (if ($profile.development // false) then ($catalog.development // []) else [] end)
+          + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
+          + ($profile.shells // []) + ($profile.nixPackages // [])) | unique')"
+      new_packages="$(jq -cn --argjson profile "$target_json" --argjson catalog "$catalog" '
+        (($catalog.base // []) + (if ($profile.development // false) then ($catalog.development // []) else [] end)
+          + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
+          + ($profile.shells // []) + ($profile.nixPackages // [])) | unique')"
+      printf '\npackages:\n'
+      jq -nr --argjson old "$old_packages" --argjson new "$new_packages" \
+        '(($new - $old)[] | "+ " + .), (($old - $new)[] | "- " + .)' || true
+      for field in packageGroups homebrewCasks allowUnfree shells; do
+        printf '\n%s:\n' "$field"
+        jq -nr --argjson old "$current_json" --argjson new "$target_json" --arg field "$field" '
+          (((($new[$field] // []) - ($old[$field] // []))[]) | "+ " + .),
+          (((($old[$field] // []) - ($new[$field] // []))[]) | "- " + .)' || true
+      done
+      printf '\nProviders: no profile-specific provider changes\nDotfiles: layers are reconciled during switch\n'
+      ;;
+    switch)
+      [[ -n "$name" ]] || fail "profile switch requires a name"; validate_name "$name"
+      jq -e --arg name "$name" 'has($name)' >/dev/null <<<"$profiles" || fail "profile does not exist: $name"
+      PROFILE="$name"
+      run_profile_setup plan
+      confirm "Activate profile '$name' after this plan?" || fail "profile switch cancelled"
+      run_profile_setup apply
+      ;;
+    delete)
+      [[ -n "$name" ]] || fail "profile delete requires a name"; validate_name "$name"
+      [[ "$name" != base && "$name" != development ]] || fail "built-in profile $name cannot be deleted"
+      parent="$(jq -r --arg name "$name" '.[$name].extends // empty' <<<"$profiles")"
+      [[ -n "$parent" ]] || fail "profile does not exist: $name"
+      [[ "$active" != "$name" ]] || fail "active profile $name must first be switched to its parent: $parent"
+      children="$(jq -r --arg name "$name" 'to_entries[] | select(.value.extends == $name) | .key' <<<"$profiles")"
+      [[ -z "$children" ]] || fail "profile $name still has child profiles: $(paste -sd, <<<"$children")"
+      if "$DRY_RUN"; then printf 'Would delete profile definition %s.\n' "$name"; else rm -rf "$ROOT/nix/$name"; fi
+      ;;
+    *) fail "unknown profile command: $action" ;;
+  esac
+}
+
 run_profile_setup() {
-  local mode="$1"
+  local mode="$1" profiles selected_shell setup_args=()
   read_state
   [[ -f "$ROOT/setup.sh" ]] || fail "$ROOT is not a HomeWeave profile"
+  profiles="$(nix --extra-experimental-features 'nix-command flakes' \
+    eval --json "path:$ROOT#lib.setup.profiles" 2>/dev/null || printf '{}')"
+  selected_shell="$(jq -r --arg profile "$PROFILE" '.[$profile].primaryShell // empty' <<<"$profiles")"
+  [[ -z "$selected_shell" ]] || PRIMARY_SHELL="$selected_shell"
+  "$ASSUME_YES" && setup_args+=(--yes)
   if [[ "$mode" == plan ]]; then
     HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only
+      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only "${setup_args[@]}"
   else
     if ! prepare_adoptions; then
       restore_adoptions
       fail "could not stage adopted configurations"
     fi
     if HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL"; then
+      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" "${setup_args[@]}"; then
       : >"$ROOT/.state/adoptions"
       date -u +%Y%m%dT%H%M%SZ >"$ROOT/.state/applied"
+      write_state
+      record_receipt
+      printf 'Active HomeWeave profile: %s\n' "$PROFILE"
       ADOPTION_BACKUP_ROOT=""
     else
       restore_adoptions
@@ -881,19 +1284,61 @@ uninstall_recorded_casks() {
   "$DRY_RUN" || rm -f "$record"
 }
 
+uninstall_recorded_providers() {
+  local record="$ROOT/.state/provider-installations.tsv" provider_name id provider command
+  [[ -s "$record" ]] || return 0
+  load_builtin_provider
+  while IFS=$'\t' read -r provider_name id; do
+    provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
+    if [[ -z "$provider" ]]; then warn "provider $provider_name is unavailable; recorded application $id was retained"; continue; fi
+    command="$(jq -r '.executable' <<<"$provider")"
+    if "$DRY_RUN"; then
+      "$command" plan --action remove "$id"
+    else
+      "$command" plan --action remove "$id"
+      "$command" apply --action remove "$id"
+    fi
+  done <"$record"
+  "$DRY_RUN" || rm -f "$record"
+}
+
 uninstall_command() {
-  local archive
+  local archive active parent confirmation profiles
   [[ -d "$ROOT" && -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
+  active=""
+  [[ ! -r "$ROOT/.state/active-profile" ]] || active="$(<"$ROOT/.state/active-profile")"
+  if [[ -n "$PROFILE" && "$UNINSTALL_ALL" == false && "$UNINSTALL_NUKE" == false ]]; then
+    validate_name "$PROFILE"
+    if [[ "$PROFILE" != "$active" ]]; then
+      printf 'Profile %s is inactive; its reusable definition was retained and no machine changes were needed.\n' "$PROFILE"
+      return
+    fi
+    profiles="$(profile_metadata)"
+    parent="$(jq -r --arg profile "$PROFILE" '.[$profile].extends // empty' <<<"$profiles")"
+    [[ -n "$parent" ]] || fail "active profile $PROFILE has no parent; use uninstall --all instead"
+    if "$DRY_RUN"; then
+      printf 'Would plan and switch active profile %s to its parent %s; the profile definition would be retained.\n' "$PROFILE" "$parent"
+      return
+    fi
+    PROFILE="$parent"
+    run_profile_setup plan
+    confirm "Switch active profile to parent '$parent'?" || fail "profile uninstall cancelled"
+    run_profile_setup apply
+    return
+  fi
   if [[ ! -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
     fail "non-interactive uninstall requires --yes or --dry-run"
   fi
   printf 'HomeWeave uninstall target: %s\n' "$ROOT"
   printf 'Nix itself and unrelated Homebrew packages will not be removed.\n'
+  if "$UNINSTALL_ALL" || "$ASSUME_YES"; then
+    UNINSTALL_REMOVE_CASKS=true
+  fi
   if [[ -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
     confirm "Remove the Home Manager environment?" || UNINSTALL_KEEP_HOME_MANAGER=true
     confirm "Unlink HomeWeave-managed dotfiles?" || UNINSTALL_KEEP_DOTFILES=true
     confirm "Restore available pre-adoption dotfiles?" || UNINSTALL_NO_RESTORE=true
-    confirm "Remove casks recorded as installed by HomeWeave?" && UNINSTALL_REMOVE_CASKS=true
+    confirm "Remove casks and provider applications recorded as installed by HomeWeave?" && UNINSTALL_REMOVE_CASKS=true
     confirm "Archive the HomeWeave repository after uninstall?" && UNINSTALL_ARCHIVE_ROOT=true
     confirm "Proceed with the displayed uninstall choices?" || fail "uninstall cancelled"
   fi
@@ -901,6 +1346,22 @@ uninstall_command() {
   "$UNINSTALL_KEEP_DOTFILES" || uninstall_dotfiles
   "$UNINSTALL_NO_RESTORE" || restore_adopted_backups
   "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_casks
+  "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_providers
+  "$DRY_RUN" || rm -f "$ROOT/.state/active-profile" "$ROOT/.state/selected-profile"
+  if "$UNINSTALL_NUKE"; then
+    if "$DRY_RUN"; then
+      printf 'Would delete HomeWeave-owned root, state, receipts, backups, generated configurations, and private clones: %s\n' "$ROOT"
+      printf 'Would retain Nix and would not run global garbage collection.\n'
+      return
+    fi
+    [[ -t 0 ]] || fail "uninstall --nuke requires an interactive typed confirmation"
+    printf 'Type DELETE %s to permanently remove only the HomeWeave root: ' "$ROOT"
+    read -r confirmation
+    [[ "$confirmation" == "DELETE $ROOT" ]] || fail "nuke confirmation did not match"
+    rm -rf "$ROOT"
+    printf 'HomeWeave root removed. Nix and the shared store were retained.\n'
+    return
+  fi
   if "$UNINSTALL_ARCHIVE_ROOT"; then
     archive="${ROOT}.uninstalled.$(date -u +%Y%m%dT%H%M%SZ)"
     if "$DRY_RUN"; then
@@ -916,11 +1377,11 @@ uninstall_command() {
 }
 
 setup_command() {
-  local package filtered_packages=()
+  local package group filtered_packages=() group_unfree=()
   require_commands cp date du find git realpath sed
   [[ -d "$TEMPLATE" ]] || fail "profile template is unavailable: $TEMPLATE"
   begin_root_replacement
-  trap 'rollback_root_replacement' EXIT ERR INT TERM
+  trap 'rollback_root_replacement; release_operation_lock' EXIT ERR INT TERM
   cp -R "$TEMPLATE/." "$ROOT/"
   chmod -R u+rwX "$ROOT"
   if [[ -n "$PROFILE_OVERLAY" ]]; then
@@ -950,8 +1411,20 @@ setup_command() {
     fi
   done
   [[ -z "${filtered_packages[*]-}" ]] || add_profile_packages "${filtered_packages[@]}"
+  [[ ! -t 0 ]] || show_package_groups
+  if [[ -n "${REQUESTED_GROUPS[*]-}" ]]; then
+    add_profile_groups "${REQUESTED_GROUPS[@]}"
+    for group in "${REQUESTED_GROUPS[@]}"; do
+      case "$group" in cloud) group_unfree+=(terraform) ;; desktop) group_unfree+=(vscode) ;; esac
+    done
+    if ((${#group_unfree[@]} > 0)); then
+      confirm "Accept the declared unfree licenses required by the selected groups (${group_unfree[*]})?" \
+        || fail "selected package groups require explicit unfree-package acceptance"
+      add_profile_unfree "${group_unfree[@]}"
+    fi
+  fi
   select_optional_packages
-  write_state
+  write_pending_state
   show_profile_packages
   scan_dotfiles
   initialize_git
@@ -967,6 +1440,7 @@ setup_command() {
     printf 'Then: %s/home-weave apply\n' "$ROOT"
   fi
   commit_root_replacement
+  release_operation_lock
   trap - EXIT ERR INT TERM
 }
 
@@ -1016,7 +1490,7 @@ restore_command() {
   if [[ -z "$url" && -t 0 ]]; then printf 'Git repository URL: '; read -r url; fi
   [[ -n "$url" && "$url" != *$'\n'* ]] || fail "restore requires a Git URL"
   staging="$(mktemp -d)"
-  trap 'rm -rf "$staging"; rollback_root_replacement' EXIT
+  trap 'rm -rf "$staging"; rollback_root_replacement; release_operation_lock' EXIT
   git clone --quiet "$url" "$staging/repository" \
     || fail "could not clone the HomeWeave repository; verify authentication"
   [[ -f "$staging/repository/flake.nix" && -f "$staging/repository/setup.sh" ]] \
@@ -1050,6 +1524,7 @@ restore_command() {
     run_profile_setup apply
   fi
   commit_root_replacement
+  release_operation_lock
   trap - ERR INT TERM EXIT
   rm -rf "$staging"
 }
@@ -1125,8 +1600,9 @@ update_command() {
 }
 
 provider_command() {
-  local action="${POSITIONAL_ARGS[0]:-list}" provider_name="${POSITIONAL_ARGS[1]:-}" provider command capabilities
+  local action="${POSITIONAL_ARGS[0]:-list}" provider_name="${POSITIONAL_ARGS[1]:-}" provider command capabilities id record temporary installed_before=""
   require_commands jq
+  load_builtin_provider
   jq -e 'type == "array"' >/dev/null <<<"$EXTENSIONS_JSON" || fail "invalid extension manifest"
   if [[ "$action" == list ]]; then
     jq -r '.[] | "\(.name)\t\(.capabilities | join(","))"' <<<"$EXTENSIONS_JSON"
@@ -1141,9 +1617,30 @@ provider_command() {
   grep -Fxq "$action" <<<"$capabilities" || fail "$provider_name does not support $action"
   [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
   if [[ "$action" == install || "$action" == update || "$action" == remove ]]; then
+    if [[ "$action" == install ]] && grep -Fxq inventory <<<"$capabilities"; then
+      installed_before="$("$command" inventory 2>/dev/null \
+        | jq -r '.items[]? | select(.installed == true) | .id' 2>/dev/null || true)"
+    fi
     "$command" plan --action "$action" "${POSITIONAL_ARGS[@]:2}"
     confirm "Allow $provider_name to $action the selected applications?" || fail "provider action declined"
-    exec "$command" apply --action "$action" "${POSITIONAL_ARGS[@]:2}"
+    "$command" apply --action "$action" "${POSITIONAL_ARGS[@]:2}"
+    record="$ROOT/.state/provider-installations.tsv"
+    mkdir -p "$ROOT/.state"
+    if [[ "$action" == install ]]; then
+      touch "$record"
+      for id in "${POSITIONAL_ARGS[@]:2}"; do
+        grep -Fxq "$id" <<<"$installed_before" && continue
+        grep -Fqx "$provider_name"$'\t'"$id" "$record" || printf '%s\t%s\n' "$provider_name" "$id" >>"$record"
+      done
+    elif [[ "$action" == remove && -f "$record" ]]; then
+      temporary="$record.tmp.$$"
+      cp "$record" "$temporary"
+      for id in "${POSITIONAL_ARGS[@]:2}"; do
+        grep -Fvx "$provider_name"$'\t'"$id" "$temporary" >"$record" || true
+        cp "$record" "$temporary"
+      done
+      rm -f "$temporary"
+    fi
   else
     exec "$command" "$action" "${POSITIONAL_ARGS[@]:2}"
   fi
@@ -1171,6 +1668,13 @@ parse_common_options "$@"
 normalize_root
 
 case "$COMMAND" in
+  setup|apply|update|uninstall) acquire_operation_lock ;;
+  profile)
+    case "${POSITIONAL_ARGS[0]:-list}" in create|switch|delete) acquire_operation_lock ;; esac
+    ;;
+esac
+
+case "$COMMAND" in
   setup) setup_command ;;
   plan) run_profile_setup plan ;;
   apply) run_profile_setup apply ;;
@@ -1178,6 +1682,8 @@ case "$COMMAND" in
   restore) restore_command ;;
   sync) sync_command ;;
   uninstall) uninstall_command ;;
+  profile) profile_command ;;
+  status) status_command ;;
   provider) provider_command ;;
   extension) extension_command ;;
   help|--help|-h) usage ;;

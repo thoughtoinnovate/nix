@@ -5,7 +5,7 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 case "${1:-}" in
-  plan|apply|restore|sync|update|uninstall|provider|extension|help)
+  plan|apply|restore|sync|update|profile|status|uninstall|provider|extension|help)
     [[ -f "$ROOT/home-weave" ]] || {
       printf 'error: repository launcher is missing: %s/home-weave\n' "$ROOT" >&2
       exit 1
