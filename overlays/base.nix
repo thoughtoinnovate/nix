@@ -14,6 +14,7 @@ let
       git
       gnugrep
       gnused
+      gum
       jq
       nix
       rsync

@@ -76,6 +76,9 @@ dotfiles, and preflights Stow before activation. Existing roots are replaced
 only after confirmation and are retained under `backup/<timestamp>`; failures
 restore the original root.
 
+The optional-package checklist uses arrow keys to move, Space to toggle any
+number of entries, and Enter to confirm the selected set.
+
 Nixpkgs search results show the declared upstream homepage, Nixpkgs maintainer
 handles, license, and description in a preview panel. Nixpkgs does not provide
 verified publisher identity, so HomeWeave labels official status as unverified
