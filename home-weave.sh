@@ -746,7 +746,7 @@ initialize_git() {
   fi
   printf 'Git repository initialized at %s. Review files before committing or pushing.\n' "$ROOT"
   if [[ -t 0 ]] && confirm "Create the initial HomeWeave commit?"; then
-    for candidate in flake.nix flake.lock home-weave.json nix dotfiles extensions README.md SECURITY.md setup.sh home.nix overlay.nix .gitignore; do
+    for candidate in flake.nix flake.lock home-weave home-weave.json nix dotfiles extensions README.md SECURITY.md setup.sh home.nix overlay.nix .gitignore; do
       [[ -e "$ROOT/$candidate" ]] && paths+=("$candidate")
     done
     git -C "$ROOT" add -- "${paths[@]}"
@@ -822,13 +822,15 @@ setup_command() {
   scan_dotfiles
   initialize_git
   printf '\nHomeWeave repository created at %s\n' "$ROOT"
+  printf 'Repository launcher: %s/home-weave\n' "$ROOT"
   if [[ -z "$APPLY_NOW" && -t 0 ]]; then
     confirm "Build and install HomeWeave now?" && APPLY_NOW=true || APPLY_NOW=false
   fi
   if [[ "$APPLY_NOW" == true ]]; then
     run_profile_setup apply
   else
-    printf 'Run: home-weave plan && home-weave apply\n'
+    printf 'Run: %s/home-weave plan\n' "$ROOT"
+    printf 'Then: %s/home-weave apply\n' "$ROOT"
   fi
   commit_root_replacement
   trap - EXIT ERR INT TERM

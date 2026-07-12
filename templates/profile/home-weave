@@ -1,0 +1,8 @@
+#!/bin/sh
+
+set -eu
+
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+exec nix --extra-experimental-features 'nix-command flakes' \
+  run "path:$ROOT#home-weave" -- "$@" --root "$ROOT"

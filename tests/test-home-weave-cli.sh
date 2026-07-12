@@ -24,6 +24,7 @@ run_cli setup --yes --no-git --no-apply \
 
 ROOT="$TEST_HOME/.home-weave"
 test -f "$ROOT/flake.nix"
+test -x "$ROOT/home-weave"
 test "$(<"$ROOT/.state/active-profile")" = work
 test "$(<"$ROOT/.state/primary-shell")" = fish
 grep -Fq 'extends = "development";' "$ROOT/nix/work/profile.nix"

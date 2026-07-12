@@ -13,6 +13,14 @@ manager even when the profile repository is private.
 Use `home-weave plan` to build safely and `home-weave apply` to activate. The
 compatibility wrapper `./setup.sh` also restores the profile on Linux or Apple
 Silicon macOS.
+
+Before activation installs the global command, use the repository-local
+launcher, which supplies the required Nix feature flags automatically:
+
+```sh
+./home-weave plan
+./home-weave apply
+```
 Credentials must remain outside this repository and the Nix store.
 
 The active machine selection is stored under the Git-ignored `.state`
