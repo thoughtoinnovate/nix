@@ -501,7 +501,7 @@ mv "$TEMP_FLAKE" "$TARGET_FLAKE"
 nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_DIR"
 
 preflight_activation() {
-  local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0
+  local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 unfree_name=""
   local download_bytes=0 large_build=false
   output_file="$(mktemp)"
   data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
@@ -510,7 +510,9 @@ preflight_activation() {
     "$CONFIG_DIR#homeConfigurations.\"$USER\".activationPackage" >"$output_file" 2>&1; then
     cat "$output_file" >&2
     if grep -Eqi 'unfree|license' "$output_file"; then
-      fail "preflight found an unfree package that is not explicitly allowed by the profile"
+      unfree_name="$(sed -nE "s/.*Refusing to evaluate package '([^']+)'.*/\1/p" "$output_file" | head -n 1)"
+      unfree_name="${unfree_name%-[0-9]*}"
+      fail "preflight found unfree package ${unfree_name:-unknown}; add its package name to allowUnfree in nix/$PROFILE/profile.nix after reviewing the upstream license"
     elif grep -Eqi 'unsupported|not supported on' "$output_file"; then
       fail "preflight found a package unsupported on $SYSTEM; remove it or choose another group"
     fi

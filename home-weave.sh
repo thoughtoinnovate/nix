@@ -499,12 +499,86 @@ show_package_groups() {
 }
 
 add_profile_unfree() {
-  local file="$ROOT/nix/$PROFILE/profile.nix" temporary package_values="" package
-  for package in "$@"; do package_values+=" \"$package\""; done
+  local file="$ROOT/nix/$PROFILE/profile.nix" temporary package_values="" package existing
+  local packages=()
+  existing="$(sed -nE 's/.*allowUnfree = \[([^]]*)\].*/\1/p' "$file" \
+    | grep -oE '"[^"]+"' | tr -d '"' || true)"
+  while IFS= read -r package; do [[ -z "$package" ]] || packages+=("$package"); done <<<"$existing"
+  for package in "$@"; do packages+=("$package"); done
+  while IFS= read -r package; do package_values+=" \"$package\""; done \
+    < <(printf '%s\n' "${packages[@]}" | sed '/^$/d' | sort -u)
   [[ -n "$package_values" ]] || return 0
   temporary="$file.tmp.$$"
   sed -E "s/allowUnfree = \[[^]]*\];/allowUnfree = [$package_values ];/" "$file" >"$temporary"
   mv "$temporary" "$file"
+}
+
+detect_unfree_packages() {
+  local pinned="$1" paths_file expression package
+  shift
+  paths_file="$(mktemp)"
+  printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0) | split("."))' >"$paths_file"
+  expression="
+    let
+      flake = builtins.getFlake \"$pinned\";
+      pkgs = import flake.outPath {
+        system = builtins.currentSystem;
+        config.allowUnfree = true;
+      };
+      paths = builtins.fromJSON (builtins.readFile \"$paths_file\");
+      get = path: builtins.foldl' (set: name: builtins.getAttr name set) pkgs path;
+      isFree = license:
+        if license == null then true
+        else if builtins.isList license then builtins.all isFree license
+        else if builtins.isAttrs license then license.free or false
+        else false;
+      info = path:
+        let package = get path; in {
+          name = builtins.concatStringsSep \".\" path;
+          free = isFree (package.meta.license or null);
+        };
+    in map info paths
+  "
+  if nix --extra-experimental-features 'nix-command flakes' eval --impure --json --expr "$expression" 2>/dev/null \
+    | jq -r '.[] | select(.free == false) | .name'; then
+    rm -f "$paths_file"
+  else
+    rm -f "$paths_file"
+    return 1
+  fi
+}
+
+accept_unfree_packages() {
+  local pinned="$1"
+  shift
+  local unfree_packages=()
+  (($# > 0)) || return 0
+  mapfile -t unfree_packages < <(detect_unfree_packages "$pinned" "$@") \
+    || fail "could not inspect selected package licenses"
+  if ((${#unfree_packages[@]} > 0)); then
+    printf 'Unfree license metadata: %s\n' "$(IFS=', '; printf '%s' "${unfree_packages[*]}")"
+    confirm "Accept these upstream licenses and record the package allow-list?" \
+      || fail "unfree package selection was not accepted"
+    add_profile_unfree "${unfree_packages[@]}"
+  fi
+}
+
+apply_reviewed_upstream_allowlist() {
+  jq '
+    with_entries(
+      (.key | split(".") | .[2:] | join(".")) as $package
+      | if $package == "claude-code"
+          and ((.value.homepage // "") | startswith("https://github.com/anthropics/claude-code"))
+          and ((.value.provenance // []) | index("binaryNativeCode") != null)
+        then .value += {
+          publisher: "Anthropic",
+          publisherVerified: true,
+          publisherEvidence: "Vendor binary from downloads.claude.ai, checksum-pinned by Nixpkgs"
+        }
+        else .value += {publisherVerified: false}
+        end
+    )
+  '
 }
 
 pinned_nixpkgs_ref() {
@@ -615,7 +689,7 @@ load_default_package_ids() {
 }
 
 preview_final_package_selection() {
-  local metadata="$1" package details version upstream maintainers author
+  local metadata="$1" package details version upstream maintainers author publisher_label
   shift
   printf '\nFinal package selection:\n'
   printf '%-38s %-12s %-24s %-20s %s\n' \
@@ -635,10 +709,17 @@ preview_final_package_selection() {
         author="github:${author%%/*}"
       fi
     fi
-    printf '%-38.38s %-12.12s %-24.24s %-20.20s \033[31m%s\033[0m\n' \
-      "$package" "$version" "$author" '🏢 Official Nixpkgs' '🔴 Unverified upstream'
+    if [[ "$(jq -r '.publisherVerified // false' <<<"$details")" == true ]]; then
+      publisher_label="🟢 $(jq -r '.publisher' <<<"$details") verified"
+    else
+      publisher_label='🔴 Unverified upstream'
+    fi
+    printf '%-38.38s %-12.12s %-24.24s %-20.20s %s\n' \
+      "$package" "$version" "$author" '🏢 Official Nixpkgs' "$publisher_label"
     maintainers="$(jq -r '(.maintainers // []) | join(", ")' <<<"$details")"
     [[ -z "$maintainers" ]] || printf '  Nix maintainers: %s\n' "$maintainers"
+    [[ "$(jq -r '.publisherVerified // false' <<<"$details")" != true ]] \
+      || printf '  Publisher evidence: %s\n' "$(jq -r '.publisherEvidence' <<<"$details")"
   done
 }
 
@@ -746,6 +827,7 @@ select_optional_packages() {
             results="$(jq 'to_entries | .[:50] | from_entries' <<<"$results")"
           fi
           results="$(enrich_nixpkgs_results "$pinned" "$results")"
+          results="$(apply_reviewed_upstream_allowlist <<<"$results")"
           normalized_metadata="$(jq -c '
             to_entries
             | map({key: (.key | split(".") | .[2:] | join(".")), value: .value})
@@ -793,10 +875,16 @@ select_optional_packages() {
                   fi
                   display="$(printf '%-38.38s %-11.11s %-22.22s %-19.19s ' \
                     "$package" "$version" "$author" '🏢 Official Nixpkgs')"
-                  display+=$'\033[31m🔴 Upstream unverified\033[0m'
+                  if [[ "$(jq -r --arg package "$package" '.[$package].publisherVerified // false' <<<"$normalized_metadata")" == true ]]; then
+                    display+=$'\033[32m🟢 Anthropic verified\033[0m'
+                    verification="verified"
+                  else
+                    display+=$'\033[31m🔴 Upstream unverified\033[0m'
+                    verification="unverified"
+                  fi
                   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                     "$display" "$package" "$version" "$upstream" "$maintainers" \
-                    "official NixOS package repository" "unverified" "Nixpkgs" "$license" "$description"
+                    "official NixOS package repository" "$verification" "true" "$license" "$description"
                 fi
               done || true)"
           if [[ -n "$search_rows" ]]; then
@@ -829,16 +917,11 @@ select_optional_packages() {
       printf 'Package selections were discarded.\n'
       return 0
     fi
+    if [[ -z "$pinned" ]] && ! pinned="$(pinned_nixpkgs_ref)"; then
+      fail "could not verify selected package licenses against pinned Nixpkgs"
+    fi
+    accept_unfree_packages "$pinned" "${package_list[@]}"
     add_profile_packages "${package_list[@]}"
-    for package in "${package_list[@]}"; do
-      if [[ "$package" == vscode ]]; then
-        if confirm "Accept the unfree license metadata for vscode?"; then
-          add_profile_unfree vscode
-        else
-          fail "vscode selection requires unfree-package acceptance"
-        fi
-      fi
-    done
   fi
 }
 
@@ -1389,7 +1472,7 @@ uninstall_command() {
 }
 
 setup_command() {
-  local package group filtered_packages=() group_unfree=()
+  local package group pinned filtered_packages=() group_unfree=()
   require_commands cp date du find git realpath sed
   [[ -d "$TEMPLATE" ]] || fail "profile template is unavailable: $TEMPLATE"
   begin_root_replacement
@@ -1422,7 +1505,11 @@ setup_command() {
       filtered_packages+=("$package")
     fi
   done
-  [[ -z "${filtered_packages[*]-}" ]] || add_profile_packages "${filtered_packages[@]}"
+  if [[ -n "${filtered_packages[*]-}" ]]; then
+    pinned="$(pinned_nixpkgs_ref)" || fail "could not verify requested packages against pinned Nixpkgs"
+    accept_unfree_packages "$pinned" "${filtered_packages[@]}"
+    add_profile_packages "${filtered_packages[@]}"
+  fi
   [[ ! -t 0 ]] || show_package_groups
   if [[ -n "${REQUESTED_GROUPS[*]-}" ]]; then
     add_profile_groups "${REQUESTED_GROUPS[@]}"

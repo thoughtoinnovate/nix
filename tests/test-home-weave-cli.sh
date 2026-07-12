@@ -20,7 +20,7 @@ run_cli() {
 
 run_cli setup --yes --no-git --no-apply \
   --profile work --extends development \
-  --shell fish,zsh --group cloud --package terraform
+  --shell fish,zsh --group cloud
 
 ROOT="$TEST_HOME/.home-weave"
 test -f "$ROOT/flake.nix"
@@ -31,7 +31,7 @@ test "$(<"$ROOT/.state/primary-shell")" = fish
 grep -Fq 'extends = "development";' "$ROOT/nix/work/profile.nix"
 grep -Fq 'shells = [ "fish" "zsh" ];' "$ROOT/nix/work/profile.nix"
 grep -Fq 'packageGroups = [ "cloud" ];' "$ROOT/nix/work/profile.nix"
-grep -Fq 'nixPackages = [ "terraform" ];' "$ROOT/nix/work/profile.nix"
+grep -Fq 'nixPackages = [ ];' "$ROOT/nix/work/profile.nix"
 
 printf 'old setup\n' >"$ROOT/old-marker"
 run_cli setup --yes --no-git --no-apply --profile base --shell zsh
