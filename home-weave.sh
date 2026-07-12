@@ -471,18 +471,47 @@ enrich_nixpkgs_results() {
 
 select_optional_packages() {
   local selected="" query="" pinned results searched="" package results_file result_count
+  local selection token index valid available_packages=() package_list=() tokens=()
   [[ -t 0 ]] || return 0
-  printf '\nSelect optional Nix packages. Tab selects multiple entries.\n'
-  if command -v fzf >/dev/null 2>&1; then
-    selected="$(printf '%s\n' bat eza jq tmux htop awscli2 terraform kubectl vscode \
-      | while IFS= read -r package; do
-          grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS" || printf '%s\n' "$package"
-        done \
-      | fzf --multi \
-          --bind='space:toggle,tab:toggle+down,shift-tab:toggle+up' \
-          --marker='✓ ' --pointer='›' --info=inline-right \
-          --header='SPACE/TAB: select multiple • ENTER: confirm • ESC: cancel' \
-          --prompt='Optional Nix packages> ' || true)"
+  printf '\nOptional Nix packages:\n'
+  for package in bat eza jq tmux htop awscli2 terraform kubectl vscode; do
+    if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
+      available_packages+=("$package")
+      printf '  %d) %s\n' "${#available_packages[@]}" "$package"
+    fi
+  done
+  while :; do
+    printf 'Select multiple numbers or names separated by commas (example: 1,3,terraform), or Enter to skip: '
+    read -r selection
+    [[ -n "$selection" ]] || break
+    package_list=()
+    tokens=()
+    read -r -a tokens <<<"${selection//,/ }"
+    valid=true
+    for token in "${tokens[@]}"; do
+      [[ -n "$token" ]] || continue
+      if [[ "$token" =~ ^[0-9]+$ ]]; then
+        index=$((10#$token - 1))
+        if ((index < 0 || index >= ${#available_packages[@]})); then
+          warn "optional package number is out of range: $token"
+          valid=false
+          break
+        fi
+        package="${available_packages[$index]}"
+      elif printf '%s\n' "${available_packages[@]}" | grep -Fxq "$token"; then
+        package="$token"
+      else
+        warn "unknown optional package: $token"
+        valid=false
+        break
+      fi
+      printf '%s\n' "${package_list[@]}" | grep -Fxq "$package" || package_list+=("$package")
+    done
+    "$valid" && break
+  done
+  if ((${#package_list[@]} > 0)); then
+    selected="$(printf '%s\n' "${package_list[@]}")"
+    printf 'Selected optional packages: %s\n' "$(IFS=', '; printf '%s' "${package_list[*]}")"
   fi
   printf 'Search the pinned official Nixpkgs repository? Enter a term or leave blank: '
   read -r query
