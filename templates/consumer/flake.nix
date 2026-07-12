@@ -1,5 +1,5 @@
 {
-  description = "Consumer of the thoughtoinnovate Nix base";
+  description = "Consumer of HomeWeave";
 
   inputs = {
     nix-base.url = "github:thoughtoinnovate/nix";
@@ -39,7 +39,7 @@
               stateVersion = "26.05";
             };
 
-            thoughtoinnovate.development.enable = true;
+            homeWeave.development.enable = true;
             programs.home-manager.enable = true;
           }
         ];

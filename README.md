@@ -1,4 +1,4 @@
-# thoughtoinnovate/nix
+# HomeWeave
 
 Reusable Nix overlays and Home Manager modules for a consistent terminal and
 development environment on Linux and macOS.
@@ -40,84 +40,80 @@ different interactive shell automatically.
 
 ## Bootstrap a machine
 
-Clone the repository and run the installer interactively:
+Start the interactive personal setup directly from GitHub:
 
 ```sh
-./install.sh
+nix run github:thoughtoinnovate/nix#home-weave -- setup
 ```
 
-Interactive setup optionally creates a personal profile repository. It asks
-for a local profile directory and an optional GitHub or GitLab SSH remote, then
-generates an overrides-only `dotfiles/custom` tree. It initializes Git locally
-but never commits, pushes, or stores provider credentials. The generated Stow
-directory is internal and is not a user-facing choice.
+The command creates one user-owned, private Git repository:
 
-Or make the choices explicit:
+```text
+~/.home-weave/
+├── flake.nix and flake.lock
+├── nix/<profile>/profile.nix
+├── dotfiles/custom/<home-relative-path>
+├── .state/                 # generated and Git-ignored
+└── backup/<timestamp>/     # local and Git-ignored
+```
+
+Use another root when personal and work editions must coexist:
 
 ```sh
-./install.sh --shell fish --profile development
-./install.sh --shell zsh --profile base
+home-weave setup --root ~/.company-home-weave
 ```
 
-The installer:
-
-1. Detects Linux versus Apple Silicon macOS and the CPU architecture.
-2. Offers Bash, Zsh, Fish, or Nushell.
-3. Activates either the `base` or `development` profile.
-4. Downloads the official installer from `https://nixos.org/nix/install` only
-   when Nix is missing and after confirmation.
-5. Generates a local flake under
-   `~/.config/thoughtoinnovate-nix` and activates it with Home Manager.
-6. Copies the bundled dotfile template into a generated Stow tree, simulates
-   Stow to detect conflicts, then links `common`, the selected shell, Starship,
-   Ghostty, and Neovim. Profile setup additionally composes custom public or
-   private components.
-
-It is safe to rerun when both generated repositories are clean. It stops on
-dotfile conflicts or local changes and never uses Stow's `--adopt` option. It
-does not change the login shell, install credentials, or overwrite an unrelated
-Home Manager configuration. For testing an unpublished checkout, use:
+Non-interactive choices can be supplied explicitly:
 
 ```sh
-./install.sh --base-url "path:$PWD" --shell fish --profile development
+home-weave setup --profile development --shell fish,zsh \
+  --package awscli2 --package terraform --no-apply
 ```
 
-Add `--generate-only` to inspect and lock the generated flake without
-activating Home Manager or running Stow.
+Setup detects the platform, resolves named profile inheritance, shows inherited
+packages, supports multi-select and pinned Nixpkgs search, scans selected
+dotfiles, and preflights Stow before activation. Existing roots are replaced
+only after confirmation and are retained under `backup/<timestamp>`; failures
+restore the original root.
 
-The private work repository can provide a small wrapper around this installer
-after it exports its `work` overlay and Home Manager module.
+Build without activation, apply, update inputs, restore, or synchronize Git:
+
+```sh
+home-weave plan
+home-weave apply
+home-weave update
+home-weave restore git@gitlab.com:group/my-home-weave.git
+home-weave sync
+```
+
+`install.sh` remains the compatibility activation backend. New users should use
+the `home-weave` command.
 
 ## Create a personal or work profile
 
-Most users should create one small configuration repository rather than fork
-either public base:
+Personal users normally let `home-weave setup` create the repository. To build
+a redistributable private work edition, initialize the distribution template:
 
 ```sh
-mkdir my-profile && cd my-profile
-nix flake init -t github:thoughtoinnovate/nix#profile
+nix flake new -t github:thoughtoinnovate/nix#distribution company-home-weave
+cd company-home-weave
 nix flake lock
-git init && git add . && git commit -m "Create system profile"
-./setup.sh
 ```
 
-The generated repository pins this Nix base, uses its bundled shell, terminal,
-and Neovim template, then adds `overlay.nix`, `home.nix`, and
-`dotfiles/custom` last. One repository can represent a personal setup and
-another a work setup.
-
-The profile works from GitHub, GitLab, self-hosted Git, SSH, HTTPS, or a local
-path. Users can clone it and run `./setup.sh`, or use the provider-neutral
-bootstrap:
+Change `distributionUrl` in the generated flake, add company profiles under
+`profile-overlay/nix`, and register private software providers. Employees with
+GitLab SSH authentication can then run:
 
 ```sh
-./bootstrap.sh \
-  --config-url https://gitlab.com/alice/system-profile.git \
-  -- --shell fish
+nix run 'git+ssh://git@gitlab.com/company/nix.git#home-weave' -- setup
 ```
 
-Private repositories require Git authentication before bootstrap. The setup
-framework does not copy or manage SSH keys, tokens, or credentials.
+The work edition pins this public core, supplies work profiles and extensions,
+and re-exports the same CLI. Employees do not run personal setup first. The
+versioned provider contract supports inventory, search, install, update, and
+remove operations with a displayed plan and explicit confirmation. IRU code
+belongs only in the private work repository; the public core contains the
+generic provider interface.
 
 GUI applications launched from Finder, Spotlight, or a desktop menu generally
 do not source interactive shell files. Configure those applications with an
@@ -211,19 +207,19 @@ Enable the development profile in a Home Manager configuration:
 ```nix
 {
   imports = [ nix-base.homeModules.development ];
-  thoughtoinnovate.development.enable = true;
+  homeWeave.development.enable = true;
 }
 ```
 
 The module installs only the shells selected through
-`thoughtoinnovate.base.shells`, plus common packages and fonts. Home Manager
+`homeWeave.base.shells`, plus common packages and fonts. Home Manager
 does not write shell, Starship, Ghostty, Git, or Neovim configuration; Stow is
 the final owner of the composed files. Bash and Zsh both source a portable common
 file rather than sourcing one shell's startup file from the other. Credential
 files are not loaded automatically.
 
 ```nix
-thoughtoinnovate.base = {
+homeWeave.base = {
   enable = true;
   shells = [ "fish" ];
 };
@@ -265,7 +261,7 @@ Import `nix-base.darwinModules.default` in a nix-darwin configuration:
 {
   imports = [ nix-base.darwinModules.default ];
 
-  thoughtoinnovate.darwin = {
+  homeWeave.darwin = {
     enable = true;
     primaryUser = "alice";
     installGhostty = true;

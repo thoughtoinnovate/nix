@@ -1,7 +1,7 @@
 # Bundled default dotfiles
 
 Portable shell, terminal, prompt, and editor configuration bundled with
-`thoughtoinnovate/nix` and delivered through GNU Stow.
+HomeWeave and delivered through GNU Stow.
 
 Each top-level directory is an independent Stow package. A typical installation
 for Zsh is:

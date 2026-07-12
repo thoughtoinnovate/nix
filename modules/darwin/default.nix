@@ -4,11 +4,13 @@
   ...
 }:
 let
-  cfg = config.thoughtoinnovate.darwin;
+  cfg = config.homeWeave.darwin;
 in
 {
-  options.thoughtoinnovate.darwin = {
-    enable = lib.mkEnableOption "the thoughtoinnovate macOS environment";
+  imports = [ (lib.mkAliasOptionModule [ "thoughtoinnovate" "darwin" ] [ "homeWeave" "darwin" ]) ];
+
+  options.homeWeave.darwin = {
+    enable = lib.mkEnableOption "the HomeWeave macOS environment";
 
     primaryUser = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -28,13 +30,19 @@ in
       default = true;
       description = "Whether to install the Ghostty macOS application using Homebrew Cask.";
     };
+
+    casks = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Additional reviewed Homebrew casks managed by nix-darwin.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
     assertions = [
       {
         assertion = !cfg.manageHomebrew || cfg.primaryUser != null;
-        message = "thoughtoinnovate.darwin.primaryUser must be set when Homebrew management is enabled.";
+        message = "homeWeave.darwin.primaryUser must be set when Homebrew management is enabled.";
       }
     ];
 
@@ -47,7 +55,7 @@ in
 
     homebrew = lib.mkIf cfg.manageHomebrew {
       enable = true;
-      casks = lib.optionals cfg.installGhostty [ "ghostty" ];
+      casks = lib.unique (lib.optionals cfg.installGhostty [ "ghostty" ] ++ cfg.casks);
       onActivation = {
         autoUpdate = false;
         upgrade = false;

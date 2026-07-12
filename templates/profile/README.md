@@ -1,8 +1,8 @@
 # Personal configuration profile
 
-This repository extends `thoughtoinnovate/nix` and its bundled sanitized
-dotfile template. Edit `overlay.nix`, `home.nix`, and `dotfiles/custom`, then
-commit `flake.lock`.
+This private repository extends HomeWeave from `thoughtoinnovate/nix` (or a
+private work distribution) and its sanitized defaults. Named profiles live at
+`nix/<name>/profile.nix`; personal dotfiles live under `dotfiles/custom`.
 
 Put personal, non-secret files under `dotfiles/custom` using their final home
 paths, for example `dotfiles/custom/.config/git/config`. The included
@@ -10,11 +10,14 @@ paths, for example `dotfiles/custom/.config/git/config`. The included
 the home directory. Keep credentials in local credential stores or a secret
 manager even when the profile repository is private.
 
-Run `./setup.sh` to restore the profile on Linux or Apple Silicon macOS.
+Use `home-weave plan` to build safely and `home-weave apply` to activate. The
+compatibility wrapper `./setup.sh` also restores the profile on Linux or Apple
+Silicon macOS.
 Credentials must remain outside this repository and the Nix store.
 
-Change `lib.setup.defaults` in `flake.nix` to select the default shell and
-package profile. Command-line `--shell` and `--profile` options take priority.
+The active machine selection is stored under the Git-ignored `.state`
+directory. Add packages, shells, casks, and unfree allow-list entries to the
+selected `profile.nix`. Custom profiles may extend any existing profile.
 
 ## Private work components
 

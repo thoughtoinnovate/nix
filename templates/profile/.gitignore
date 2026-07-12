@@ -12,3 +12,5 @@ dotfiles/custom/.aws/credentials
 dotfiles/custom/.connections/
 result
 result-*
+.state/
+backup/

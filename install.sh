@@ -6,7 +6,8 @@ PROFILE=""
 SELECTED_SHELL=""
 BASE_URL="${NIX_BASE_URL:-github:thoughtoinnovate/nix}"
 CONFIG_URL="${NIX_CONFIG_URL:-}"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/thoughtoinnovate-nix"
+CONFIG_DIR="${NIX_CONFIG_DIR:-}"
+NAMESPACE="${HOME_WEAVE_NAMESPACE:-}"
 ASSUME_YES=false
 ALLOW_NIX_INSTALL=true
 GENERATE_ONLY=false
@@ -26,10 +27,11 @@ Usage: ./install.sh [options]
 
 Options:
   --shell bash|zsh|fish|nushell   Shell to install and configure
-  --profile base|development     Overlay/profile to activate
+  --profile NAME                 Built-in or custom profile to activate
   --base-url URL                 Base flake URL (default: github:thoughtoinnovate/nix)
   --config-url URL               User profile flake URL or local path
   --config-dir PATH              Generated Home Manager flake directory
+  --namespace NAME              Runtime namespace (default: home-weave)
   --yes                          Accept the Nix installation prompt
   --no-install-nix               Fail instead of installing Nix when it is missing
   --generate-only                Write and lock the local flake without activating it
@@ -46,6 +48,11 @@ EOF
 fail() {
   printf 'error: %s\n' "$*" >&2
   exit 1
+}
+
+validate_namespace() {
+  [[ "$NAMESPACE" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$NAMESPACE" != "." && "$NAMESPACE" != ".." ]] \
+    || fail "namespace must contain only letters, numbers, dots, underscores, or hyphens: $NAMESPACE"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -73,6 +80,11 @@ while [[ $# -gt 0 ]]; do
     --config-dir)
       [[ $# -ge 2 ]] || fail "--config-dir requires a value"
       CONFIG_DIR="$2"
+      shift 2
+      ;;
+    --namespace)
+      [[ $# -ge 2 ]] || fail "--namespace requires a value"
+      NAMESPACE="$2"
       shift 2
       ;;
     --yes)
@@ -200,19 +212,27 @@ if ! command -v nix >/dev/null 2>&1; then
 fi
 
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
+export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}extra-experimental-features = nix-command flakes"
 
 initialize_profile_interactive() {
-  local answer profile_dir remote_url origin
+  local answer profile_dir remote_url origin namespace_answer
 
-  [[ -z "$CONFIG_URL" && -t 0 ]] || return
+  [[ -z "$CONFIG_URL" && -t 0 ]] || return 0
   printf 'Create or connect a personal profile repository? [y/N] '
   read -r answer
   [[ "$answer" == "y" || "$answer" == "Y" ]] || return 0
   command -v git >/dev/null 2>&1 || fail "Git is required to create a personal profile repository"
 
-  printf 'Profile directory [%s]: ' "$HOME/.config/thoughtoinnovate-profile"
+  if [[ -z "$NAMESPACE" ]]; then
+    printf 'HomeWeave namespace [home-weave]: '
+    read -r namespace_answer
+    NAMESPACE="${namespace_answer:-home-weave}"
+  fi
+  validate_namespace
+
+  printf 'Profile directory [%s]: ' "${XDG_CONFIG_HOME:-$HOME/.config}/$NAMESPACE/profiles/default"
   read -r profile_dir
-  profile_dir="${profile_dir:-$HOME/.config/thoughtoinnovate-profile}"
+  profile_dir="${profile_dir:-${XDG_CONFIG_HOME:-$HOME/.config}/$NAMESPACE/profiles/default}"
   case "$profile_dir" in
     \~/*) profile_dir="$HOME/${profile_dir#\~/}" ;;
     /*) ;;
@@ -248,6 +268,11 @@ initialize_profile_interactive() {
 
   if [[ ! -e "$profile_dir/flake.nix" ]]; then
     (cd "$profile_dir" && nix "${NIX_FLAGS[@]}" flake init -t "$BASE_URL#profile")
+    if [[ "$NAMESPACE" != "home-weave" ]]; then
+      sed "s/namespace = \"home-weave\";/namespace = \"$NAMESPACE\";/" \
+        "$profile_dir/flake.nix" >"$profile_dir/.flake.nix.namespace"
+      mv "$profile_dir/.flake.nix.namespace" "$profile_dir/flake.nix"
+    fi
   fi
   [[ -x "$profile_dir/setup.sh" ]] || fail "$profile_dir/setup.sh is missing or not executable"
 
@@ -265,13 +290,31 @@ if [[ -n "$CONFIG_URL" ]]; then
   schema_version="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.schemaVersion")"
   [[ "$schema_version" == "1" || "$schema_version" == "2" ]] \
     || fail "unsupported profile schema: $schema_version"
-  if [[ -z "$SELECTED_SHELL" ]]; then
-    SELECTED_SHELL="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.defaults.shell")"
+  if [[ -z "$NAMESPACE" ]]; then
+    if profile_namespace="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.namespace" 2>/dev/null)"; then
+      NAMESPACE="$profile_namespace"
+    fi
   fi
   if [[ -z "$PROFILE" ]]; then
     PROFILE="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.defaults.profile")"
   fi
+  profiles_json="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.profiles" 2>/dev/null || true)"
+  if [[ -n "$profiles_json" ]]; then
+    profile_json="$(jq -ce --arg profile "$PROFILE" '.[$profile] // empty' <<<"$profiles_json")"
+    [[ -n "$profile_json" ]] || fail "profile is not exported by $CONFIG_URL: $PROFILE"
+    if [[ -z "$SELECTED_SHELL" ]]; then
+      SELECTED_SHELL="$(jq -r '.primaryShell' <<<"$profile_json")"
+    fi
+    PROFILE_SHELLS="$(jq -r '.shells | join(",")' <<<"$profile_json")"
+    PROFILE_CASKS="$(jq -r '.homebrewCasks | join(",")' <<<"$profile_json")"
+  elif [[ -z "$SELECTED_SHELL" ]]; then
+    SELECTED_SHELL="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.defaults.shell")"
+  fi
 fi
+
+NAMESPACE="${NAMESPACE:-home-weave}"
+validate_namespace
+CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/$NAMESPACE/generated}"
 
 if [[ -z "$SELECTED_SHELL" ]]; then
   [[ -t 0 ]] || fail "use --shell when running non-interactively"
@@ -288,28 +331,40 @@ case "$SELECTED_SHELL" in
   *) fail "unsupported shell: $SELECTED_SHELL" ;;
 esac
 
-case "$PROFILE" in
-  base|development) ;;
-  *) fail "unsupported profile: $PROFILE" ;;
-esac
+[[ "$PROFILE" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$PROFILE" != "." && "$PROFILE" != ".." ]] \
+  || fail "unsafe profile name: $PROFILE"
 
-MARKER="# Generated by thoughtoinnovate/nix install.sh"
+MARKER="# Generated by HomeWeave install.sh"
 TARGET_FLAKE="$CONFIG_DIR/flake.nix"
 
-if [[ -e "$TARGET_FLAKE" ]] && ! grep -Fq "$MARKER" "$TARGET_FLAKE"; then
-  fail "$TARGET_FLAKE already exists and was not generated by this installer"
+if [[ -e "$TARGET_FLAKE" ]] \
+  && ! grep -Fq "$MARKER" "$TARGET_FLAKE" \
+  && ! grep -Fq '# Generated by thoughtoinnovate/nix install.sh' "$TARGET_FLAKE"; then
+  fail "$TARGET_FLAKE already exists and was not generated by HomeWeave"
 fi
 
 mkdir -p "$CONFIG_DIR"
 TEMP_FLAKE="$CONFIG_DIR/.flake.nix.tmp"
 DEVELOPMENT_ENABLED=false
-[[ "$PROFILE" == "development" ]] && DEVELOPMENT_ENABLED=true
+if [[ -n "${profile_json:-}" ]]; then
+  [[ "$(jq -r '.development // false' <<<"$profile_json")" == true ]] && DEVELOPMENT_ENABLED=true
+  UNFREE_PACKAGES="$(jq -r '.allowUnfree | map(@json) | join(" ")' <<<"$profile_json")"
+elif [[ "$PROFILE" == "development" ]]; then
+  DEVELOPMENT_ENABLED=true
+  UNFREE_PACKAGES='"vscode"'
+else
+  UNFREE_PACKAGES='"vscode"'
+fi
 
 if [[ -n "$CONFIG_URL" ]]; then
   INPUT_DECLARATIONS="profile.url = \"$CONFIG_URL\";
     nix-base.follows = \"profile/nix-base\";"
   CUSTOM_OVERLAY="++ [ inputs.profile.overlays.default ]"
-  CUSTOM_MODULE="inputs.profile.homeModules.default"
+  if [[ -n "${profile_json:-}" ]]; then
+    CUSTOM_MODULE="inputs.profile.homeModules.profiles.\"$PROFILE\""
+  else
+    CUSTOM_MODULE="inputs.profile.homeModules.default"
+  fi
 else
   INPUT_DECLARATIONS="nix-base.url = \"$BASE_URL\";"
   CUSTOM_OVERLAY=""
@@ -319,7 +374,7 @@ fi
 cat >"$TEMP_FLAKE" <<EOF
 $MARKER
 {
-  description = "Local Home Manager consumer of thoughtoinnovate/nix";
+  description = "Local Home Manager consumer generated by HomeWeave";
 
   inputs = {
     $INPUT_DECLARATIONS
@@ -337,7 +392,7 @@ $MARKER
           ++ nixpkgs.lib.optionals $DEVELOPMENT_ENABLED [ nix-base.overlays.development ]
           $CUSTOM_OVERLAY;
         config.allowUnfreePredicate = pkg:
-          builtins.elem (nixpkgs.lib.getName pkg) [ "vscode" ];
+          builtins.elem (nixpkgs.lib.getName pkg) [ $UNFREE_PACKAGES ];
       };
     in
     {
@@ -357,7 +412,7 @@ $MARKER
 
             programs.home-manager.enable = true;
 
-            thoughtoinnovate = {
+            homeWeave = {
               base = {
                 enable = true;
                 shells = [ "$SELECTED_SHELL" ];
@@ -388,16 +443,17 @@ export PATH="$HOME/.nix-profile/bin:$PATH"
 
 compose_profile_components() {
   local composer
-  composer="${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}"
+  composer="${HOME_WEAVE_DOTFILE_COMPOSER:-${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}}"
   [[ -r "$composer" ]] || fail "dotfile composer is missing: $composer"
 
   nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.dotfiles" \
-    | bash "$composer" --shell "$SELECTED_SHELL"
+    | bash "$composer" --shell "$SELECTED_SHELL" \
+      --shells "${PROFILE_SHELLS:-$SELECTED_SHELL}" --namespace "$NAMESPACE"
 }
 
 compose_bundled_dotfiles() {
   local composer dotfiles_path
-  composer="${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}"
+  composer="${HOME_WEAVE_DOTFILE_COMPOSER:-${THOUGHTOINNOVATE_DOTFILE_COMPOSER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/compose-dotfiles.sh}}"
   [[ -r "$composer" ]] || fail "dotfile composer is missing: $composer"
   dotfiles_path="$(nix "${NIX_FLAGS[@]}" eval --raw "$BASE_URL#lib.dotfiles.path")"
   [[ -d "$dotfiles_path" ]] || fail "bundled dotfiles are missing: $dotfiles_path"
@@ -409,19 +465,24 @@ compose_bundled_dotfiles() {
       entries: ["common", "starship", "@shell", "ghostty", "nvim"]
         | map({ from: ., to: ".", mode: "merge" })
     }]
-  }' | bash "$composer" --shell "$SELECTED_SHELL"
+  }' | bash "$composer" --shell "$SELECTED_SHELL" \
+    --shells "$SELECTED_SHELL" --namespace "$NAMESPACE"
 }
 
-install_macos_ghostty() {
+install_macos_apps() {
+  local cask
   [[ "$OS" == "darwin" ]] || return
-  [[ -d "/Applications/Ghostty.app" || -d "$HOME/Applications/Ghostty.app" ]] && return
-
-  if command -v brew >/dev/null 2>&1; then
-    brew install --cask ghostty
-  else
-    printf 'warning: Homebrew is unavailable; Ghostty was not installed.\n' >&2
+  PROFILE_CASKS="${PROFILE_CASKS:-ghostty}"
+  [[ -n "$PROFILE_CASKS" ]] || return
+  if ! command -v brew >/dev/null 2>&1; then
+    printf 'warning: Homebrew is unavailable; declared macOS casks were not installed.\n' >&2
     printf '         Install Homebrew or use the exported nix-darwin module.\n' >&2
+    return
   fi
+  while IFS= read -r cask; do
+    [[ "$cask" =~ ^[a-zA-Z0-9@+._-]+$ ]] || fail "unsafe Homebrew cask name: $cask"
+    brew list --cask "$cask" >/dev/null 2>&1 || brew install --cask "$cask"
+  done < <(tr ',' '\n' <<<"$PROFILE_CASKS")
 }
 
 if [[ -n "$CONFIG_URL" ]]; then
@@ -429,7 +490,7 @@ if [[ -n "$CONFIG_URL" ]]; then
 else
   compose_bundled_dotfiles
 fi
-install_macos_ghostty
+install_macos_apps
 
 case "$SELECTED_SHELL" in
   nushell) SHELL_PROGRAM="nu" ;;
@@ -441,5 +502,6 @@ printf '  System:  %s\n' "$SYSTEM"
 printf '  Profile: %s\n' "$PROFILE"
 printf '  Shell:   %s\n' "$SELECTED_SHELL"
 printf '  Config:  %s\n' "$CONFIG_DIR"
+printf '  Namespace: %s\n' "$NAMESPACE"
 printf '\nOpen a new terminal or run: %s/.nix-profile/bin/%s\n' "$HOME" "$SHELL_PROGRAM"
 printf 'The login shell was not changed automatically.\n'

@@ -3,7 +3,9 @@
 set -Eeuo pipefail
 
 SELECTED_SHELL=""
+SELECTED_SHELLS=""
 DOTFILES_JSON_FILE=""
+NAMESPACE="${HOME_WEAVE_NAMESPACE:-home-weave}"
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -12,7 +14,7 @@ fail() {
 
 usage() {
   cat <<'EOF'
-Usage: compose-dotfiles.sh --shell bash|zsh|fish|nushell [--json FILE]
+Usage: compose-dotfiles.sh --shell bash|zsh|fish|nushell [--shells CSV] [--namespace NAME] [--json FILE]
 
 Reads lib.setup.dotfiles JSON from standard input unless --json is supplied.
 EOF
@@ -25,9 +27,19 @@ while [[ $# -gt 0 ]]; do
       SELECTED_SHELL="$2"
       shift 2
       ;;
+    --shells)
+      [[ $# -ge 2 ]] || fail "--shells requires a comma-separated value"
+      SELECTED_SHELLS="$2"
+      shift 2
+      ;;
     --json)
       [[ $# -ge 2 ]] || fail "--json requires a file"
       DOTFILES_JSON_FILE="$2"
+      shift 2
+      ;;
+    --namespace)
+      [[ $# -ge 2 ]] || fail "--namespace requires a value"
+      NAMESPACE="$2"
       shift 2
       ;;
     --help|-h)
@@ -42,6 +54,12 @@ case "$SELECTED_SHELL" in
   bash|zsh|fish|nushell) ;;
   *) fail "unsupported shell: $SELECTED_SHELL" ;;
 esac
+SELECTED_SHELLS="${SELECTED_SHELLS:-$SELECTED_SHELL}"
+while IFS= read -r selected_shell; do
+  case "$selected_shell" in bash|zsh|fish|nushell) ;; *) fail "unsupported shell: $selected_shell" ;; esac
+done < <(tr ',' '\n' <<<"$SELECTED_SHELLS")
+[[ "$NAMESPACE" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$NAMESPACE" != "." && "$NAMESPACE" != ".." ]] \
+  || fail "unsafe namespace: $NAMESPACE"
 
 for command in git jq realpath rsync stow; do
   command -v "$command" >/dev/null 2>&1 || fail "$command is required to compose dotfiles"
@@ -67,7 +85,7 @@ jq -e '
   )
 ' >/dev/null <<<"$dotfiles_json" || fail "invalid dotfile component schema"
 
-data_root="${XDG_DATA_HOME:-$HOME/.local/share}/thoughtoinnovate"
+data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
 stow_root="$data_root/dotfiles"
 sources_root="$data_root/sources"
 current_dir="$stow_root/current"
@@ -169,6 +187,13 @@ apply_entry() {
   target="$(jq -r '.to' <<<"$component_entry")"
   mode="$(jq -r '.mode' <<<"$component_entry")"
   [[ "$from" == "@shell" ]] && from="$SELECTED_SHELL"
+  if [[ "$from" == "@shells" ]]; then
+    while IFS= read -r selected_shell; do
+      apply_entry "$component_source" "$component_name" \
+        "$(jq -c --arg from "$selected_shell" '.from = $from' <<<"$component_entry")"
+    done < <(tr ',' '\n' <<<"$SELECTED_SHELLS")
+    return
+  fi
   validate_relative_path "$from" "layer '$component_name' source path"
   validate_relative_path "$target" "layer '$component_name' target path"
   [[ "$mode" != "replace" || "$target" != "." ]] \

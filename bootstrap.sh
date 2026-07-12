@@ -5,6 +5,8 @@ set -Eeuo pipefail
 CONFIG_URL=""
 CONFIG_REF=""
 CONFIG_DIR=""
+NAMESPACE="${HOME_WEAVE_NAMESPACE:-home-weave}"
+NAMESPACE_EXPLICIT=false
 SETUP_ARGS=()
 
 fail() {
@@ -20,6 +22,7 @@ Options:
   --config-url URL   GitHub, GitLab, self-hosted Git, or local Git URL
   --config-ref REF   Optional branch, tag, or commit
   --config-dir PATH  Checkout directory
+  --namespace NAME   Runtime namespace (default: home-weave)
   --help             Show this help
 
 Example:
@@ -44,6 +47,12 @@ while [[ $# -gt 0 ]]; do
       CONFIG_DIR="$2"
       shift 2
       ;;
+    --namespace)
+      [[ $# -ge 2 ]] || fail "--namespace requires a value"
+      NAMESPACE="$2"
+      NAMESPACE_EXPLICIT=true
+      shift 2
+      ;;
     --)
       shift
       SETUP_ARGS=("$@")
@@ -58,6 +67,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$CONFIG_URL" ]] || fail "--config-url is required"
+[[ "$NAMESPACE" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ && "$NAMESPACE" != "." && "$NAMESPACE" != ".." ]] \
+  || fail "unsafe namespace: $NAMESPACE"
 command -v git >/dev/null 2>&1 || fail "Git is required for central bootstrap"
 
 if [[ -z "$CONFIG_DIR" ]]; then
@@ -65,7 +76,7 @@ if [[ -z "$CONFIG_DIR" ]]; then
   repository_name="${repository_name##*/}"
   repository_name="${repository_name%.git}"
   [[ "$repository_name" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "could not derive a safe repository name"
-  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/thoughtoinnovate/profiles/$repository_name"
+  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/$NAMESPACE/profiles/$repository_name"
 fi
 
 if [[ -e "$CONFIG_DIR" ]]; then
@@ -89,4 +100,7 @@ else
 fi
 
 [[ -x "$CONFIG_DIR/setup.sh" ]] || fail "$CONFIG_DIR/setup.sh is missing or not executable"
+if "$NAMESPACE_EXPLICIT"; then
+  SETUP_ARGS=(--namespace "$NAMESPACE" "${SETUP_ARGS[@]}")
+fi
 exec "$CONFIG_DIR/setup.sh" "${SETUP_ARGS[@]}"

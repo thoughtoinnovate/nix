@@ -5,11 +5,11 @@
   ...
 }:
 let
-  cfg = config.thoughtoinnovate.base;
+  cfg = config.homeWeave.base;
 in
 {
-  options.thoughtoinnovate.base = {
-    enable = lib.mkEnableOption "the thoughtoinnovate base user environment";
+  options.homeWeave.base = {
+    enable = lib.mkEnableOption "the HomeWeave base user environment";
 
     shells = lib.mkOption {
       type = lib.types.listOf (
@@ -32,7 +32,7 @@ in
     assertions = [
       {
         assertion = cfg.shells != [ ];
-        message = "thoughtoinnovate.base.shells must contain at least one shell.";
+        message = "homeWeave.base.shells must contain at least one shell.";
       }
     ];
 

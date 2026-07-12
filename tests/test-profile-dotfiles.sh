@@ -37,7 +37,7 @@ nvim_rev="$(make_git_repo "$PRIVATE_NVIM")"
 
 run_composer() {
   HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_DATA" \
-    bash "$COMPOSER" --shell "${1:-zsh}" --json "$JSON_FILE"
+    bash "$COMPOSER" --shell "${1:-zsh}" --namespace "${2:-home-weave}" --json "$JSON_FILE"
 }
 
 expect_failure() {
@@ -77,6 +77,17 @@ done
 [[ -L "$TEST_HOME/.config/nushell/config.nu" ]]
 [[ ! -e "$TEST_HOME/.zshrc" ]]
 
+# One profile can activate configuration for multiple selected shells.
+jq -n --arg base "$BASE_DOTFILES" '{layers: [{
+  name: "base",
+  source: {kind: "path", path: $base},
+  entries: ["common", "starship", "@shells"] | map({from: ., to: ".", mode: "merge"})
+}]}' >"$JSON_FILE"
+HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_DATA" \
+  bash "$COMPOSER" --shell zsh --shells zsh,fish --namespace home-weave --json "$JSON_FILE"
+[[ -L "$TEST_HOME/.zshrc" ]]
+[[ -L "$TEST_HOME/.config/fish/config.fish" ]]
+
 # Aggregate work settings and multiple exact-commit Git components merge in order.
 jq -n \
   --arg base "$BASE_DOTFILES" \
@@ -97,10 +108,10 @@ run_composer zsh
 grep -Fq 'work zsh override' "$TEST_HOME/.zshrc"
 grep -Fq 'PROFILE_LAYER' "$TEST_HOME/.config/shell/conf.d/profile.sh"
 [[ ! -e "$TEST_HOME/.gitkeep" ]]
-[[ ! -e "$TEST_DATA/thoughtoinnovate/dotfiles/current/.gitkeep" ]]
+[[ ! -e "$TEST_DATA/home-weave/dotfiles/current/.gitkeep" ]]
 grep -Fq 'work git setting' "$TEST_HOME/.config/company/work.conf"
-[[ "$(git -C "$TEST_DATA/thoughtoinnovate/sources/work-one" rev-parse HEAD)" == "$work_rev" ]]
-[[ "$(git -C "$TEST_DATA/thoughtoinnovate/sources/work-one" symbolic-ref -q HEAD || true)" == "" ]]
+[[ "$(git -C "$TEST_DATA/home-weave/sources/work-one" rev-parse HEAD)" == "$work_rev" ]]
+[[ "$(git -C "$TEST_DATA/home-weave/sources/work-one" symbolic-ref -q HEAD || true)" == "" ]]
 
 # A partial Neovim merge preserves public files and overrides matches.
 mkdir -p "$WORK/partial-nvim/lua"
@@ -179,12 +190,12 @@ jq -n --arg url "file://$WORK_GIT" --arg rev "$work_rev" '{layers: [{
   name: "work-one", source: {kind: "git", url: $url, rev: $rev},
   entries: [{from: "work.conf", to: ".config/work.conf", mode: "merge"}]
 }]}' >"$JSON_FILE"
-git -C "$TEST_DATA/thoughtoinnovate/sources/work-one" remote set-url origin file:///wrong-origin
+git -C "$TEST_DATA/home-weave/sources/work-one" remote set-url origin file:///wrong-origin
 expect_failure "origin does not match" run_composer zsh
-git -C "$TEST_DATA/thoughtoinnovate/sources/work-one" remote set-url origin "file://$WORK_GIT"
-printf 'dirty\n' >"$TEST_DATA/thoughtoinnovate/sources/work-one/dirty"
+git -C "$TEST_DATA/home-weave/sources/work-one" remote set-url origin "file://$WORK_GIT"
+printf 'dirty\n' >"$TEST_DATA/home-weave/sources/work-one/dirty"
 expect_failure "has local changes" run_composer zsh
-rm "$TEST_DATA/thoughtoinnovate/sources/work-one/dirty"
+rm "$TEST_DATA/home-weave/sources/work-one/dirty"
 
 # Authentication/clone failure is actionable and leaves the current generation intact.
 jq '.layers[0].name = "unavailable" | .layers[0].source.url = "file:///repository-that-does-not-exist"' \
@@ -216,5 +227,17 @@ if HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_DATA" PATH="$TEST_ROOT/fake-bin:$PATH"
 fi
 [[ "$(readlink "$TEST_HOME/.zshrc")" == "$old_target" ]]
 [[ -e "$TEST_HOME/.config/nvim/lazy-lock.json" ]]
+
+# A custom namespace isolates generated state without changing target paths.
+CUSTOM_HOME="$TEST_ROOT/custom-home"
+CUSTOM_DATA="$TEST_ROOT/custom-data"
+mkdir -p "$CUSTOM_HOME"
+write_public_json
+HOME="$CUSTOM_HOME" XDG_DATA_HOME="$CUSTOM_DATA" \
+  bash "$COMPOSER" --shell zsh --namespace company-weave --json "$JSON_FILE"
+[[ -L "$CUSTOM_HOME/.zshrc" ]]
+[[ -d "$CUSTOM_DATA/company-weave/dotfiles/current" ]]
+expect_failure "unsafe namespace" env HOME="$CUSTOM_HOME" XDG_DATA_HOME="$CUSTOM_DATA" \
+  bash "$COMPOSER" --shell zsh --namespace ../escape --json "$JSON_FILE"
 
 printf 'Profile component, Git, conflict, stale-link, and rollback tests passed.\n'

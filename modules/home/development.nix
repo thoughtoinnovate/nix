@@ -5,15 +5,15 @@
   ...
 }:
 let
-  cfg = config.thoughtoinnovate.development;
+  cfg = config.homeWeave.development;
 in
 {
   imports = [ ./base.nix ];
 
-  options.thoughtoinnovate.development.enable = lib.mkEnableOption "the thoughtoinnovate development environment";
+  options.homeWeave.development.enable = lib.mkEnableOption "the HomeWeave development environment";
 
   config = lib.mkIf cfg.enable {
-    thoughtoinnovate.base.enable = lib.mkDefault true;
+    homeWeave.base.enable = lib.mkDefault true;
 
     nixpkgs = {
       overlays = [ (import ../../overlays/development.nix) ];

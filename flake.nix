@@ -28,6 +28,38 @@
     let
       baseOverlay = import ./overlays/base.nix;
       developmentOverlay = import ./overlays/development.nix;
+      mkHomeWeaveApp =
+        {
+          system,
+          extensions ? [ ],
+          distributionName ? "HomeWeave",
+          baseUrl ? "github:thoughtoinnovate/nix",
+          profileOverlay ? null,
+        }:
+        let
+          appPkgs = import nixpkgs {
+            inherit system;
+            overlays = [ baseOverlay ];
+          };
+          extensionJson = builtins.toJSON extensions;
+          wrapper = appPkgs.writeShellApplication {
+            name = "home-weave";
+            runtimeInputs = [ appPkgs.home-weave-cli ];
+            text = ''
+              export HOME_WEAVE_DISTRIBUTION=${nixpkgs.lib.escapeShellArg distributionName}
+              export HOME_WEAVE_BASE_URL=${nixpkgs.lib.escapeShellArg baseUrl}
+              export HOME_WEAVE_EXTENSIONS_JSON=${nixpkgs.lib.escapeShellArg extensionJson}
+              ${nixpkgs.lib.optionalString (profileOverlay != null) ''
+                export HOME_WEAVE_PROFILE_OVERLAY=${nixpkgs.lib.escapeShellArg (toString profileOverlay)}
+              ''}
+              exec home-weave "$@"
+            '';
+          };
+        in
+        {
+          type = "app";
+          program = "${wrapper}/bin/home-weave";
+        };
     in
     flake-utils.lib.eachSystem
       [
@@ -58,7 +90,7 @@
                     homeDirectory = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/test-user" else "/home/test-user";
                     stateVersion = "26.05";
                   };
-                  thoughtoinnovate = {
+                  homeWeave = {
                     base = {
                       enable = true;
                       shells = [ shell ];
@@ -95,6 +127,8 @@
               stow
               ;
 
+            home-weave = pkgs.home-weave-cli;
+
             base = pkgs.terminal-tools;
             base-devshell = pkgs.development-tools;
             full-development = pkgs.full-development-environment;
@@ -102,11 +136,12 @@
           };
 
           apps = {
+            home-weave = mkHomeWeaveApp { inherit system; };
             setup = {
               type = "app";
               program = "${
                 pkgs.writeShellApplication {
-                  name = "thoughtoinnovate-setup";
+                  name = "home-weave-setup";
                   runtimeInputs = with pkgs; [
                     coreutils
                     curl
@@ -117,14 +152,14 @@
                     stow
                   ];
                   text = ''
-                    export THOUGHTOINNOVATE_DOTFILE_COMPOSER=${./lib/compose-dotfiles.sh}
+                    export HOME_WEAVE_DOTFILE_COMPOSER=${./lib/compose-dotfiles.sh}
                     exec ${pkgs.bash}/bin/bash ${./install.sh} "$@"
                   '';
                 }
-              }/bin/thoughtoinnovate-setup";
-              meta.description = "Bootstrap a standalone or custom thoughtoinnovate system profile";
+              }/bin/home-weave-setup";
+              meta.description = "Bootstrap a standalone or custom HomeWeave system profile";
             };
-            default = self.apps.${system}.setup;
+            default = self.apps.${system}.home-weave;
           };
 
           devShells = {
@@ -185,6 +220,26 @@
                   bash ${./tests/test-public-dotfiles.sh} ${./dotfiles}
                   touch $out
                 '';
+
+            home-weave-cli =
+              pkgs.runCommand "home-weave-cli-tests"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    coreutils
+                    diffutils
+                    git
+                    gnugrep
+                    gnused
+                    jq
+                    ripgrep
+                  ];
+                }
+                ''
+                  bash ${./tests/test-home-weave-cli.sh} \
+                    ${./home-weave.sh} ${./templates/profile}
+                  touch $out
+                '';
           };
         }
       )
@@ -207,15 +262,21 @@
       };
 
       lib.dotfiles.path = ./dotfiles;
+      lib.mkHomeWeaveApp = mkHomeWeaveApp;
 
       templates.default = {
         path = ./templates/consumer;
-        description = "Consumer flake for the thoughtoinnovate Nix base";
+        description = "Consumer flake for HomeWeave";
       };
 
       templates.profile = {
         path = ./templates/profile;
         description = "Extensible personal or work profile using Nix and Stow";
+      };
+
+      templates.distribution = {
+        path = ./templates/distribution;
+        description = "Private redistributable HomeWeave edition";
       };
     };
 }

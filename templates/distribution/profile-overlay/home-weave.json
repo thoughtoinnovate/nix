@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "distribution": "company-home-weave",
+  "base": "git+ssh://git@gitlab.com/company/nix.git"
+}

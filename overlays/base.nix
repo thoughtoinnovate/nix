@@ -4,6 +4,29 @@ let
   isLinux = final.stdenv.hostPlatform.isLinux;
   isDarwin = final.stdenv.hostPlatform.isDarwin;
 
+  homeWeaveCli = prev.writeShellApplication {
+    name = "home-weave";
+    runtimeInputs = with final; [
+      coreutils
+      curl
+      diffutils
+      fzf
+      git
+      gnugrep
+      gnused
+      jq
+      nix
+      rsync
+      ripgrep
+      stow
+    ];
+    text = ''
+      export HOME_WEAVE_PROFILE_TEMPLATE="''${HOME_WEAVE_PROFILE_TEMPLATE:-${../templates/profile}}"
+      export HOME_WEAVE_BUNDLED_DOTFILES="''${HOME_WEAVE_BUNDLED_DOTFILES:-${../dotfiles}}"
+      exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
+    '';
+  };
+
   neovimPython = final.python3.withPackages (pythonPackages: [
     pythonPackages.cairosvg
     pythonPackages.debugpy
@@ -30,6 +53,7 @@ let
     [
       curl
       git
+      homeWeaveCli
       neovim
       nerd-fonts.fira-code
       starship
@@ -57,6 +81,7 @@ let
   ++ lib.optionals isDarwin [ "/Applications" ];
 in
 {
+  home-weave-cli = homeWeaveCli;
   inherit
     commonTerminalPackages
     commonToolPackages
