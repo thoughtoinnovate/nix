@@ -470,7 +470,7 @@ enrich_nixpkgs_results() {
 }
 
 select_optional_packages() {
-  local selected="" query="" pinned results searched="" package results_file result_count
+  local selected="" query="" pinned results searched="" package results_file result_count author display
   local selection token index=0 valid available_packages=() package_list=() tokens=()
   [[ -t 0 ]] || return 0
   printf '\nOptional Nix packages:\n'
@@ -571,26 +571,38 @@ select_optional_packages() {
                     then "not declared"
                     else (.value.maintainers | if length > 3 then .[:3] + ["+more"] else . end | join(","))
                     end),
-                  "not verified",
                   ((.value.licenses // ["unknown"]) | join(",")),
                   (.value.description // "")
                 ]
               | @tsv
             ' <<<"$results" \
-            | while IFS=$'\t' read -r package version upstream maintainers official license description; do
+            | while IFS=$'\t' read -r package version upstream maintainers license description; do
                 if ! grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
-                  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-                    "$package" "$version" "$upstream" "$maintainers" "$official" "$license" "$description"
+                  author="$upstream"
+                  if [[ "$author" == http://* || "$author" == https://* ]]; then
+                    author="${author#*://}"
+                    author="${author%%/*}"
+                    if [[ "$author" == github.com && "$upstream" == *github.com/* ]]; then
+                      author="${upstream#*github.com/}"
+                      author="github:${author%%/*}"
+                    fi
+                  fi
+                  display="$(printf '%-38.38s %-11.11s %-22.22s %-19.19s ' \
+                    "$package" "$version" "$author" '🧩 Community')"
+                  display+=$'\033[31m🔴 Unverified\033[0m'
+                  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                    "$display" "$package" "$version" "$upstream" "$maintainers" \
+                    "community" "unverified" "unknown" "$license" "$description"
                 fi
               done \
-            | fzf --multi --delimiter=$'\t' --with-nth=1,2,3,5 \
+            | fzf --multi --ansi --delimiter=$'\t' --with-nth=1 \
                 --bind='space:toggle,tab:toggle+down,shift-tab:toggle+up' \
                 --marker='✓ ' --pointer='›' --info=inline-right \
-                --header=$'Package\tVersion\tUpstream/author URL\tOfficial?' \
+                --header='PACKAGE                                VERSION     UPSTREAM/AUTHOR        PACKAGE TYPE        PUBLISHER' \
                 --header-first \
-                --preview="'$PACKAGE_PREVIEW' {}" --preview-window='down,45%,wrap' \
+                --preview="bash '$PACKAGE_PREVIEW' {}" --preview-window='down,45%,wrap' \
                 --prompt='SPACE/TAB select • ENTER confirm > ' \
-            | cut -f1 || true)"
+            | cut -f2 || true)"
         fi
       fi
     else
@@ -627,7 +639,7 @@ show_provider_inventory() {
       jq -r --arg provider "$(jq -r '.name' <<<"$provider")" \
         '.items[]
           | select(.installed == true)
-          | "  [\($provider)] \(.name) \(.version // "") — Publisher: \(.publisher // "not declared") (\(if .publisherVerified == true then "verified by provider" else "not verified" end))"' \
+          | "  [\($provider)] \(.name) \(.version // "") — Publisher: \(.publisher // "not declared") \(if .publisherVerified == true then "🟢 Verified" else "🔴 Unverified" end) • \(if .official == true then "🏢 Official" else "🧩 Provider-managed" end)"' \
         <<<"$output"
     else
       warn "provider inventory failed: $(jq -r '.name' <<<"$provider")"
