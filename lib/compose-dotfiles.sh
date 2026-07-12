@@ -308,11 +308,16 @@ fi
 transaction_started=true
 mv "$temp_dir" "$current_dir"
 
+stow_preflight_output="$(mktemp)"
 if stow --simulate --restow --no-folding --dir="$stow_root" --target="$HOME" current \
+  >"$stow_preflight_output" 2>&1 \
   && stow --restow --no-folding --dir="$stow_root" --target="$HOME" current; then
+  rm -f "$stow_preflight_output"
   rm -rf "$backup_dir"
   transaction_started=false
 else
+  cat "$stow_preflight_output" >&2
+  rm -f "$stow_preflight_output"
   stow --delete --no-folding --dir="$stow_root" --target="$HOME" current >/dev/null 2>&1 || true
   rm -rf "$current_dir"
   if [[ -d "$backup_dir" ]]; then

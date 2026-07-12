@@ -153,6 +153,10 @@ grep -Fq restored "$TEST_HOME/.home-weave-restored"
 test -d "$ROOT"
 
 run_cli uninstall --profile development --dry-run | grep -Fq 'inactive'
+touch "$ROOT/.state/home-manager-pending"
+pending_uninstall_output="$(run_cli uninstall --all --dry-run --yes)"
+grep -Fq 'Home Manager will remove its managed packages' <<<"$pending_uninstall_output"
+rm -f "$ROOT/.state/home-manager-pending"
 run_cli uninstall --all --dry-run --yes | grep -Fq 'Repository retained'
 run_cli uninstall --nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
 run_cli uninstall nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'

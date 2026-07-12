@@ -347,6 +347,16 @@
                     ${./lib/verify-publishers.jq} ${./lib/reviewed-publishers.json}
                   touch $out
                 '';
+
+            install-no-casks =
+              pkgs.runCommand "install-no-casks-tests"
+                {
+                  nativeBuildInputs = [ pkgs.gnused ];
+                }
+                ''
+                  bash ${./tests/test-install-no-casks.sh} ${./install.sh}
+                  touch $out
+                '';
           };
         }
       )

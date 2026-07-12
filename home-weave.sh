@@ -1408,6 +1408,7 @@ run_profile_setup() {
       date -u +%Y%m%dT%H%M%SZ >"$ROOT/.state/applied"
       write_state
       record_receipt
+      rm -f "$ROOT/.state/home-manager-pending"
       printf 'Active HomeWeave profile: %s\n' "$PROFILE"
       ADOPTION_BACKUP_ROOT=""
     else
@@ -1453,16 +1454,16 @@ restore_adopted_backups() {
 
 uninstall_home_manager() {
   local generated="$ROOT/.state/generated"
-  [[ -f "$ROOT/.state/applied" ]] || {
+  [[ -f "$ROOT/.state/applied" || -f "$ROOT/.state/home-manager-pending" ]] || {
     printf 'No HomeWeave activation marker was found; Home Manager uninstall was skipped.\n'
     return
   }
-  [[ -f "$generated/flake.nix" ]] || fail "generated Home Manager configuration is missing"
   printf 'Home Manager will remove its managed packages, files, and generations.\n'
   "$DRY_RUN" && return 0
+  [[ -f "$generated/flake.nix" ]] || fail "generated Home Manager configuration is missing"
   printf 'y\n' | nix --extra-experimental-features 'nix-command flakes' \
     run "$generated#home-manager" -- uninstall
-  rm -f "$ROOT/.state/applied"
+  rm -f "$ROOT/.state/applied" "$ROOT/.state/home-manager-pending"
   printf 'Home Manager environment removed. Nix itself was not removed.\n'
 }
 

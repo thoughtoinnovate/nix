@@ -20,7 +20,10 @@ DOTFILE_SNAPSHOT_ROOT=""
 INSTALLED_CASKS_THIS_RUN=()
 
 cleanup() {
+  local home_manager_profile pending_marker rollback_succeeded=false
   if "$HOME_MANAGER_SWITCHED" && ! "$ACTIVATION_COMMITTED"; then
+    home_manager_profile="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager"
+    pending_marker="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/home-manager-pending"
     if "$DOTFILES_CHANGED"; then
       stow_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles"
       stow --delete --no-folding --dir="$stow_root" --target="$HOME" current >/dev/null 2>&1 || true
@@ -43,13 +46,21 @@ cleanup() {
     done
     if [[ -x "$PREVIOUS_HOME_GENERATION/activate" ]]; then
       printf 'warning: restoring the previous Home Manager generation after activation failure\n' >&2
-      "$PREVIOUS_HOME_GENERATION/activate" >/dev/null || \
+      if nix-env --profile "$home_manager_profile" --rollback >/dev/null 2>&1 \
+        && "$PREVIOUS_HOME_GENERATION/activate" >/dev/null; then
+        rollback_succeeded=true
+      else
         printf 'warning: automatic Home Manager rollback failed; run %s/activate\n' "$PREVIOUS_HOME_GENERATION" >&2
+      fi
     else
       printf 'warning: removing the first Home Manager generation after activation failure\n' >&2
-      printf 'y\n' | nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- uninstall >/dev/null 2>&1 || \
+      if printf 'y\n' | nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- uninstall >/dev/null 2>&1; then
+        rollback_succeeded=true
+      else
         printf 'warning: automatic removal of the failed first generation did not complete\n' >&2
+      fi
     fi
+    "$rollback_succeeded" && rm -f "$pending_marker"
   fi
   if [[ -n "$TEMP_INSTALL_DIR" && -d "$TEMP_INSTALL_DIR" ]]; then
     rm -rf "$TEMP_INSTALL_DIR"
@@ -572,6 +583,9 @@ PREVIOUS_HOME_GENERATION="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/n
 nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- \
   switch --flake "$CONFIG_DIR#$USER"
 HOME_MANAGER_SWITCHED=true
+mkdir -p "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
+printf '%s\n' "$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)" \
+  >"${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/home-manager-pending"
 
 export PATH="$HOME/.nix-profile/bin:$PATH"
 
@@ -605,9 +619,9 @@ compose_bundled_dotfiles() {
 
 install_macos_apps() {
   local cask cask_record
-  [[ "$OS" == "darwin" ]] || return
+  [[ "$OS" == "darwin" ]] || return 0
   PROFILE_CASKS="${PROFILE_CASKS:-}"
-  [[ -n "$PROFILE_CASKS" ]] || return
+  [[ -n "$PROFILE_CASKS" ]] || return 0
   if ! command -v brew >/dev/null 2>&1; then
     printf 'warning: Homebrew is unavailable; declared macOS casks were not installed.\n' >&2
     printf '         Install Homebrew or use the exported nix-darwin module.\n' >&2
