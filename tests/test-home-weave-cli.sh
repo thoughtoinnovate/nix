@@ -74,4 +74,16 @@ grep -Fq 'apply apply --action install managed' "$provider_log"
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension list | grep -Fxq fake
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension fake status | grep -Fq 'command command status'
 
+# Uninstall removes only the active Stow generation, restores missing adopted
+# files, keeps the repository, and skips Home Manager without an apply marker.
+mkdir -p "$ROOT/.state/dotfiles/current" "$ROOT/backup/restore-test/home"
+printf 'managed\n' >"$ROOT/.state/dotfiles/current/.home-weave-managed"
+printf 'restored\n' >"$ROOT/backup/restore-test/home/.home-weave-restored"
+stow --restow --no-folding --dir="$ROOT/.state/dotfiles" --target="$TEST_HOME" current
+test -L "$TEST_HOME/.home-weave-managed"
+run_cli uninstall --yes
+test ! -e "$TEST_HOME/.home-weave-managed"
+grep -Fq restored "$TEST_HOME/.home-weave-restored"
+test -d "$ROOT"
+
 printf 'HomeWeave CLI tests passed.\n'

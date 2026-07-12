@@ -470,7 +470,7 @@ compose_bundled_dotfiles() {
 }
 
 install_macos_apps() {
-  local cask
+  local cask cask_record
   [[ "$OS" == "darwin" ]] || return
   PROFILE_CASKS="${PROFILE_CASKS:-ghostty}"
   [[ -n "$PROFILE_CASKS" ]] || return
@@ -479,9 +479,15 @@ install_macos_apps() {
     printf '         Install Homebrew or use the exported nix-darwin module.\n' >&2
     return
   fi
+  cask_record="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/installed-casks"
   while IFS= read -r cask; do
     [[ "$cask" =~ ^[a-zA-Z0-9@+._-]+$ ]] || fail "unsafe Homebrew cask name: $cask"
-    brew list --cask "$cask" >/dev/null 2>&1 || brew install --cask "$cask"
+    if ! brew list --cask "$cask" >/dev/null 2>&1; then
+      brew install --cask "$cask"
+      mkdir -p "$(dirname "$cask_record")"
+      touch "$cask_record"
+      grep -Fxq "$cask" "$cask_record" || printf '%s\n' "$cask" >>"$cask_record"
+    fi
   done < <(tr ',' '\n' <<<"$PROFILE_CASKS")
 }
 

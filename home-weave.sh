@@ -23,6 +23,12 @@ MANAGED_PROVIDER_IDS=""
 REMOTE_URL=""
 RESTORE_MODE=""
 NO_GIT=false
+UNINSTALL_REMOVE_CASKS=false
+UNINSTALL_ARCHIVE_ROOT=false
+UNINSTALL_KEEP_DOTFILES=false
+UNINSTALL_KEEP_HOME_MANAGER=false
+UNINSTALL_NO_RESTORE=false
+DRY_RUN=false
 TIMESTAMP=""
 OLD_ROOT=""
 ADOPTION_BACKUP_ROOT=""
@@ -47,6 +53,7 @@ Usage:
   home-weave update [--root PATH]
   home-weave restore [GIT_URL] [--merge|--override] [--root PATH]
   home-weave sync [--root PATH]
+  home-weave uninstall [options]
   home-weave provider list|inventory|search|install|update|remove ...
   home-weave extension list|NAME [arguments...]
 
@@ -61,6 +68,14 @@ Setup options:
   --no-apply              Generate only
   --no-git                Do not initialize Git
   --yes                   Confirm safe non-interactive defaults
+
+Uninstall options:
+  --remove-casks          Remove only casks recorded as installed by HomeWeave
+  --archive-root          Move the repository to a timestamped sibling directory
+  --keep-dotfiles         Leave managed Stow links active
+  --keep-home-manager     Leave Home Manager packages and generations active
+  --no-restore            Do not restore pre-adoption dotfile backups
+  --dry-run               Display actions without changing anything
 
 The first invocation can be:
   nix run github:thoughtoinnovate/nix#home-weave -- setup
@@ -128,6 +143,12 @@ parse_common_options() {
       --apply) APPLY_NOW=true; shift ;;
       --no-apply) APPLY_NOW=false; shift ;;
       --no-git) NO_GIT=true; shift ;;
+      --remove-casks) UNINSTALL_REMOVE_CASKS=true; shift ;;
+      --archive-root) UNINSTALL_ARCHIVE_ROOT=true; shift ;;
+      --keep-dotfiles) UNINSTALL_KEEP_DOTFILES=true; shift ;;
+      --keep-home-manager) UNINSTALL_KEEP_HOME_MANAGER=true; shift ;;
+      --no-restore) UNINSTALL_NO_RESTORE=true; shift ;;
+      --dry-run) DRY_RUN=true; shift ;;
       --yes|-y) ASSUME_YES=true; shift ;;
       --merge) RESTORE_MODE=merge; shift ;;
       --override) RESTORE_MODE=override; shift ;;
@@ -787,12 +808,111 @@ run_profile_setup() {
     if HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
       bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL"; then
       : >"$ROOT/.state/adoptions"
+      date -u +%Y%m%dT%H%M%SZ >"$ROOT/.state/applied"
       ADOPTION_BACKUP_ROOT=""
     else
       restore_adoptions
       fail "activation failed; adopted configurations were restored"
     fi
   fi
+}
+
+uninstall_dotfiles() {
+  local stow_root="$ROOT/.state/dotfiles" current="$ROOT/.state/dotfiles/current"
+  local backup
+  backup="$ROOT/backup/$(date -u +%Y%m%dT%H%M%SZ)-uninstalled-dotfiles"
+  [[ -d "$current" ]] || { printf 'No active HomeWeave dotfile generation was found.\n'; return; }
+  require_commands stow
+  stow --simulate --delete --no-folding --dir="$stow_root" --target="$HOME" current \
+    || fail "could not preflight dotfile unlinking"
+  "$DRY_RUN" && return 0
+  stow --delete --no-folding --dir="$stow_root" --target="$HOME" current \
+    || fail "could not unlink the active HomeWeave dotfiles"
+  mkdir -p "$(dirname "$backup")"
+  mv "$current" "$backup"
+  printf 'Unlinked HomeWeave dotfiles; generation saved at %s.\n' "$backup"
+}
+
+restore_adopted_backups() {
+  local home_backup restored=false
+  [[ -d "$ROOT/backup" ]] || return 0
+  require_commands rsync
+  while IFS= read -r home_backup; do
+    if "$DRY_RUN"; then
+      printf 'Would restore missing files from %s.\n' "$home_backup"
+    else
+      rsync -a --ignore-existing "$home_backup/" "$HOME/"
+      restored=true
+    fi
+  done < <(find "$ROOT/backup" -mindepth 2 -maxdepth 2 -type d -name home -print | sort -r)
+  if "$restored"; then
+    printf 'Restored available pre-adoption files without overwriting current files.\n'
+  fi
+  return 0
+}
+
+uninstall_home_manager() {
+  local generated="$ROOT/.state/generated"
+  [[ -f "$ROOT/.state/applied" ]] || {
+    printf 'No HomeWeave activation marker was found; Home Manager uninstall was skipped.\n'
+    return
+  }
+  [[ -f "$generated/flake.nix" ]] || fail "generated Home Manager configuration is missing"
+  printf 'Home Manager will remove its managed packages, files, and generations.\n'
+  "$DRY_RUN" && return 0
+  printf 'y\n' | nix --extra-experimental-features 'nix-command flakes' \
+    run "$generated#home-manager" -- uninstall
+  rm -f "$ROOT/.state/applied"
+  printf 'Home Manager environment removed. Nix itself was not removed.\n'
+}
+
+uninstall_recorded_casks() {
+  local record="$ROOT/.state/installed-casks" cask
+  [[ -s "$record" ]] || { printf 'No HomeWeave-installed Homebrew casks were recorded.\n'; return; }
+  command -v brew >/dev/null 2>&1 || { warn "Homebrew is unavailable; recorded casks were left installed"; return; }
+  while IFS= read -r cask; do
+    [[ "$cask" =~ ^[a-zA-Z0-9@+._-]+$ ]] || fail "unsafe recorded cask name: $cask"
+    if "$DRY_RUN"; then
+      printf 'Would uninstall Homebrew cask: %s\n' "$cask"
+    elif brew list --cask "$cask" >/dev/null 2>&1; then
+      brew uninstall --cask "$cask"
+    fi
+  done <"$record"
+  "$DRY_RUN" || rm -f "$record"
+}
+
+uninstall_command() {
+  local archive
+  [[ -d "$ROOT" && -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
+  if [[ ! -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
+    fail "non-interactive uninstall requires --yes or --dry-run"
+  fi
+  printf 'HomeWeave uninstall target: %s\n' "$ROOT"
+  printf 'Nix itself and unrelated Homebrew packages will not be removed.\n'
+  if [[ -t 0 && "$ASSUME_YES" == false && "$DRY_RUN" == false ]]; then
+    confirm "Remove the Home Manager environment?" || UNINSTALL_KEEP_HOME_MANAGER=true
+    confirm "Unlink HomeWeave-managed dotfiles?" || UNINSTALL_KEEP_DOTFILES=true
+    confirm "Restore available pre-adoption dotfiles?" || UNINSTALL_NO_RESTORE=true
+    confirm "Remove casks recorded as installed by HomeWeave?" && UNINSTALL_REMOVE_CASKS=true
+    confirm "Archive the HomeWeave repository after uninstall?" && UNINSTALL_ARCHIVE_ROOT=true
+    confirm "Proceed with the displayed uninstall choices?" || fail "uninstall cancelled"
+  fi
+  "$UNINSTALL_KEEP_HOME_MANAGER" || uninstall_home_manager
+  "$UNINSTALL_KEEP_DOTFILES" || uninstall_dotfiles
+  "$UNINSTALL_NO_RESTORE" || restore_adopted_backups
+  "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_casks
+  if "$UNINSTALL_ARCHIVE_ROOT"; then
+    archive="${ROOT}.uninstalled.$(date -u +%Y%m%dT%H%M%SZ)"
+    if "$DRY_RUN"; then
+      printf 'Would archive repository to %s.\n' "$archive"
+    else
+      mv "$ROOT" "$archive"
+      printf 'Repository archived at %s.\n' "$archive"
+    fi
+  else
+    printf 'Repository retained at %s.\n' "$ROOT"
+  fi
+  printf 'HomeWeave uninstall complete. Nix store cleanup was not run.\n'
 }
 
 setup_command() {
@@ -821,14 +941,15 @@ setup_command() {
   choose_shell
   update_profile_shell
   show_provider_inventory
-  for package in "${REQUESTED_PACKAGES[@]}"; do
+  for package in "${REQUESTED_PACKAGES[@]-}"; do
+    [[ -n "$package" ]] || continue
     if grep -Fxq "$package" <<<"$MANAGED_PROVIDER_IDS"; then
       warn "$package is already managed by a registered provider and was omitted from Nix"
     else
       filtered_packages+=("$package")
     fi
   done
-  ((${#filtered_packages[@]} == 0)) || add_profile_packages "${filtered_packages[@]}"
+  [[ -z "${filtered_packages[*]-}" ]] || add_profile_packages "${filtered_packages[@]}"
   select_optional_packages
   write_state
   show_profile_packages
@@ -1056,6 +1177,7 @@ case "$COMMAND" in
   update) update_command ;;
   restore) restore_command ;;
   sync) sync_command ;;
+  uninstall) uninstall_command ;;
   provider) provider_command ;;
   extension) extension_command ;;
   help|--help|-h) usage ;;

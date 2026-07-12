@@ -233,6 +233,8 @@
                     gnused
                     jq
                     ripgrep
+                    rsync
+                    stow
                   ];
                 }
                 ''

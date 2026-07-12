@@ -92,10 +92,18 @@ home-weave apply
 home-weave update
 home-weave restore git@gitlab.com:group/my-home-weave.git
 home-weave sync
+home-weave uninstall
 ```
 
 `install.sh` remains the compatibility activation backend. New users should use
 the `home-weave` command.
+
+`home-weave uninstall` can remove the Home Manager environment, unlink only
+the active HomeWeave Stow generation, restore missing pre-adoption files,
+optionally remove casks recorded as installed by HomeWeave, and optionally
+archive the repository. It keeps the repository by default and never removes
+Nix or unrelated Homebrew packages. Preview it with `home-weave uninstall
+--dry-run`.
 
 ## Create a personal or work profile
 

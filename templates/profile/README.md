@@ -25,6 +25,16 @@ launcher, which supplies the required Nix feature flags automatically:
 `./setup.sh plan` and `./setup.sh apply` delegate to the same launcher for
 compatibility. Execute these scripts directly; do not prefix them with `sh`,
 because they require Bash.
+
+To preview or remove the managed environment safely:
+
+```sh
+./home-weave uninstall --dry-run
+./home-weave uninstall
+```
+
+Uninstall keeps this repository and its backups unless repository archival is
+explicitly selected. It never removes Nix itself.
 Credentials must remain outside this repository and the Nix store.
 
 The active machine selection is stored under the Git-ignored `.state`
