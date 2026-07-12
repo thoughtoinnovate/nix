@@ -42,6 +42,7 @@ UNINSTALL_NUKE=false
 TIMESTAMP=""
 OLD_ROOT=""
 ADOPTION_BACKUP_ROOT=""
+ROOT_REPLACEMENT_STARTED=false
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -262,6 +263,7 @@ snapshot_configuration() {
 begin_root_replacement() {
   TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
   OLD_ROOT=""
+  ROOT_REPLACEMENT_STARTED=false
   if [[ -e "$ROOT" ]]; then
     [[ -d "$ROOT" ]] || fail "$ROOT exists but is not a directory"
     if find "$ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
@@ -271,23 +273,32 @@ begin_root_replacement() {
         || fail "existing setup was left unchanged"
       OLD_ROOT="${ROOT}.replacing.${TIMESTAMP}.$$"
       mv "$ROOT" "$OLD_ROOT"
+      ROOT_REPLACEMENT_STARTED=true
     else
       rmdir "$ROOT"
+      ROOT_REPLACEMENT_STARTED=true
     fi
   fi
+  ROOT_REPLACEMENT_STARTED=true
   mkdir -p "$ROOT"
 }
 
 rollback_root_replacement() {
-  [[ -n "$OLD_ROOT" && -d "$OLD_ROOT" ]] || return 0
+  "$ROOT_REPLACEMENT_STARTED" || return 0
   rm -rf "$ROOT"
-  mv "$OLD_ROOT" "$ROOT"
+  if [[ -n "$OLD_ROOT" && -d "$OLD_ROOT" ]]; then
+    mv "$OLD_ROOT" "$ROOT"
+  fi
   OLD_ROOT=""
+  ROOT_REPLACEMENT_STARTED=false
 }
 
 commit_root_replacement() {
   local previous_backup
-  [[ -n "$OLD_ROOT" && -d "$OLD_ROOT" ]] || return 0
+  if [[ -z "$OLD_ROOT" || ! -d "$OLD_ROOT" ]]; then
+    ROOT_REPLACEMENT_STARTED=false
+    return 0
+  fi
   mkdir -p "$ROOT/backup"
   if [[ -d "$OLD_ROOT/backup" ]]; then
     while IFS= read -r previous_backup; do
@@ -297,6 +308,7 @@ commit_root_replacement() {
   fi
   mv "$OLD_ROOT" "$ROOT/backup/$TIMESTAMP"
   OLD_ROOT=""
+  ROOT_REPLACEMENT_STARTED=false
   prune_backups
 }
 
@@ -747,7 +759,7 @@ select_optional_packages() {
           already_included="$(jq -r 'keys[] | split(".") | .[2:] | join(".")' <<<"$results" \
             | while IFS= read -r package; do
                 grep -Fxq "$package" <<<"$DEFAULT_PACKAGE_IDS" && printf '%s\n' "$package"
-              done)"
+              done || true)"
           if [[ -n "$already_included" ]]; then
             printf 'Already included by profile %q (not added again): %s\n' \
               "$PROFILE" "$(paste -sd, <<<"$already_included")"
@@ -786,7 +798,7 @@ select_optional_packages() {
                     "$display" "$package" "$version" "$upstream" "$maintainers" \
                     "official NixOS package repository" "unverified" "Nixpkgs" "$license" "$description"
                 fi
-              done)"
+              done || true)"
           if [[ -n "$search_rows" ]]; then
             query_selected="$(printf '%s\n' "$search_rows" \
               | fzf --multi --ansi --delimiter=$'\t' --with-nth=1 \

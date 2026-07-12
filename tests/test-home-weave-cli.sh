@@ -46,6 +46,14 @@ if run_cli setup --yes --no-git --no-apply --profile broken --extends missing --
 fi
 test "$(<"$ROOT/current-marker")" = "rollback setup"
 
+NEW_FAILED_ROOT="$TEST_HOME/.home-weave-new-failure"
+if run_cli setup --root "$NEW_FAILED_ROOT" --yes --no-git --no-apply \
+  --profile broken --extends missing --shell zsh; then
+  printf 'expected new invalid profile setup to fail\n' >&2
+  exit 1
+fi
+test ! -e "$NEW_FAILED_ROOT"
+
 # Mutating operations are serialized per repository, while status remains
 # available for diagnostics.
 mkdir "${ROOT}.operation-lock"
