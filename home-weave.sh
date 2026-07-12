@@ -775,17 +775,17 @@ initialize_git() {
 run_profile_setup() {
   local mode="$1"
   read_state
-  [[ -x "$ROOT/setup.sh" ]] || fail "$ROOT is not a HomeWeave profile"
+  [[ -f "$ROOT/setup.sh" ]] || fail "$ROOT is not a HomeWeave profile"
   if [[ "$mode" == plan ]]; then
     HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only
+      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only
   else
     if ! prepare_adoptions; then
       restore_adoptions
       fail "could not stage adopted configurations"
     fi
     if HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL"; then
+      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL"; then
       : >"$ROOT/.state/adoptions"
       ADOPTION_BACKUP_ROOT=""
     else
@@ -808,6 +808,7 @@ setup_command() {
     cp -R "$PROFILE_OVERLAY/." "$ROOT/"
   fi
   chmod -R u+rwX "$ROOT"
+  chmod u+x "$ROOT/home-weave" "$ROOT/setup.sh"
   if [[ "$BASE_URL" != "github:thoughtoinnovate/nix" ]]; then
     [[ "$BASE_URL" != *$'\n'* && "$BASE_URL" != *'|'* && "$BASE_URL" != *'&'* ]] \
       || fail "unsupported distribution URL: $BASE_URL"
@@ -897,7 +898,7 @@ restore_command() {
   trap 'rm -rf "$staging"; rollback_root_replacement' EXIT
   git clone --quiet "$url" "$staging/repository" \
     || fail "could not clone the HomeWeave repository; verify authentication"
-  [[ -f "$staging/repository/flake.nix" && -x "$staging/repository/setup.sh" ]] \
+  [[ -f "$staging/repository/flake.nix" && -f "$staging/repository/setup.sh" ]] \
     || fail "remote is not a HomeWeave repository"
   repository="$(realpath "$staging/repository")"
   scan_secrets "$repository"
@@ -919,6 +920,7 @@ restore_command() {
   trap 'rm -rf "$staging"; rollback_root_replacement' ERR INT TERM
   rm -rf "$ROOT"
   mv "$staging/repository" "$ROOT"
+  chmod u+x "$ROOT/home-weave" "$ROOT/setup.sh" 2>/dev/null || true
   if [[ -n "$old_copy" ]]; then
     merge_restored_content "$old_copy"
   fi

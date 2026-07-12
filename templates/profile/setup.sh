@@ -3,6 +3,17 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "${1:-}" in
+  plan|apply|restore|sync|update|provider|extension|help)
+    [[ -f "$ROOT/home-weave" ]] || {
+      printf 'error: repository launcher is missing: %s/home-weave\n' "$ROOT" >&2
+      exit 1
+    }
+    exec bash "$ROOT/home-weave" "$@"
+    ;;
+esac
+
 NIX_FLAGS=(--extra-experimental-features "nix-command flakes")
 UPDATE_INPUTS=false
 SETUP_ARGS=()

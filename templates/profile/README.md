@@ -21,6 +21,10 @@ launcher, which supplies the required Nix feature flags automatically:
 ./home-weave plan
 ./home-weave apply
 ```
+
+`./setup.sh plan` and `./setup.sh apply` delegate to the same launcher for
+compatibility. Execute these scripts directly; do not prefix them with `sh`,
+because they require Bash.
 Credentials must remain outside this repository and the Nix store.
 
 The active machine selection is stored under the Git-ignored `.state`
