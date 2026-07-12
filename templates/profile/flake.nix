@@ -34,6 +34,7 @@
         primaryShell = "zsh";
         packageGroups = [ ];
         nixPackages = [ ];
+        providerPackages = { };
         homebrewCasks = [ ];
         allowUnfree = [ ];
       };
@@ -54,6 +55,17 @@
           // {
             nixPackages = lib.unique (parent.nixPackages ++ (current.nixPackages or [ ]));
             packageGroups = lib.unique (parent.packageGroups ++ (current.packageGroups or [ ]));
+            providerPackages =
+              let
+                currentProviders = current.providerPackages or { };
+                names = lib.unique (
+                  builtins.attrNames parent.providerPackages ++ builtins.attrNames currentProviders
+                );
+              in
+              lib.genAttrs names (
+                provider:
+                lib.unique ((parent.providerPackages.${provider} or [ ]) ++ (currentProviders.${provider} or [ ]))
+              );
             homebrewCasks = lib.unique (parent.homebrewCasks ++ (current.homebrewCasks or [ ]));
             allowUnfree = lib.unique (parent.allowUnfree ++ (current.allowUnfree or [ ]));
             development =
@@ -87,7 +99,7 @@
       homeModules.profiles = lib.mapAttrs (_: profileModule) resolvedProfiles;
 
       lib.setup = {
-        schemaVersion = 2;
+        schemaVersion = 3;
         namespace = "home-weave";
         defaults = {
           shell = "zsh";

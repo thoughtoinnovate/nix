@@ -337,8 +337,8 @@ if [[ -n "$CONFIG_URL" ]]; then
     fail "profile setup requires the packaged setup app (nix run ...#setup)"
   fi
   schema_version="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.schemaVersion")"
-  [[ "$schema_version" == "1" || "$schema_version" == "2" ]] \
-    || fail "unsupported profile schema: $schema_version"
+  [[ "$schema_version" == "3" ]] \
+    || fail "unsupported profile schema: $schema_version (this HomeWeave release requires schema 3)"
   if [[ -z "$NAMESPACE" ]]; then
     if profile_namespace="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.namespace" 2>/dev/null)"; then
       NAMESPACE="$profile_namespace"

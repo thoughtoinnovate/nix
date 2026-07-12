@@ -46,6 +46,19 @@ selected `profile.nix`. Custom profiles may extend any existing profile and
 select `packageGroups` from `python`, `data-jupyter`, `go`, `rust`, `java`,
 `web`, `cloud`, and `desktop`.
 
+Schema 3 profiles may also declare provider-owned applications. The key must
+match a provider registered by the distribution; package IDs are inherited and
+deduplicated just like Nix packages and groups:
+
+```nix
+providerPackages = {
+  company-self-service = [ "approved-editor" "approved-vpn" ];
+};
+```
+
+HomeWeave never substitutes a different provider when the declared provider is
+unavailable.
+
 Successful activations write immutable JSON receipts under
 `.state/receipts/`; inspect the latest activation with `./home-weave status`
 or `./home-weave status --json`. Manage definitions with `profile list`,

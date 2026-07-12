@@ -32,6 +32,7 @@ grep -Fq 'extends = "development";' "$ROOT/nix/work/profile.nix"
 grep -Fq 'shells = [ "fish" "zsh" ];' "$ROOT/nix/work/profile.nix"
 grep -Fq 'packageGroups = [ "cloud" ];' "$ROOT/nix/work/profile.nix"
 grep -Fq 'nixPackages = [ ];' "$ROOT/nix/work/profile.nix"
+grep -Fq 'providerPackages = { };' "$ROOT/nix/work/profile.nix"
 
 # A new named profile inherits base unless --extends selects another parent.
 run_cli setup --yes --no-git --no-apply --profile personal --shell zsh
@@ -147,7 +148,14 @@ printf 'managed\n' >"$ROOT/.state/dotfiles/current/.home-weave-managed"
 printf 'restored\n' >"$ROOT/backup/restore-test/home/.home-weave-restored"
 stow --restow --no-folding --dir="$ROOT/.state/dotfiles" --target="$TEST_HOME" current
 test -L "$TEST_HOME/.home-weave-managed"
-run_cli uninstall --yes
+cat >"$ROOT/.state/provider-status.json" <<'JSON'
+{"schemaVersion":1,"profile":"work","complete":true,"degraded":false,"items":[
+  {"provider":"fake","id":"managed","requested":true,"state":"installed",
+   "ownership":"home-weave","removalPolicy":"retain"}
+]}
+JSON
+uninstall_output="$(run_cli uninstall --yes)"
+grep -Fq 'Retained provider-managed application: [fake] managed' <<<"$uninstall_output"
 test ! -e "$TEST_HOME/.home-weave-managed"
 grep -Fq restored "$TEST_HOME/.home-weave-restored"
 test -d "$ROOT"

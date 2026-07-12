@@ -4,6 +4,7 @@
   primaryShell = "zsh";
   packageGroups = [ ];
   nixPackages = [ ];
+  providerPackages = { };
   homebrewCasks = [ ];
   allowUnfree = [ ];
 }

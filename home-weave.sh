@@ -455,6 +455,7 @@ ensure_profile() {
   primaryShell = "zsh";
   packageGroups = [ ];
   nixPackages = [ ];
+  providerPackages = { };
   homebrewCasks = [ ];
   allowUnfree = [ ];
 }
@@ -1059,6 +1060,113 @@ show_provider_inventory() {
   done < <(jq -c '.[]' <<<"$EXTENSIONS_JSON")
 }
 
+reconcile_profile_providers() {
+  local mode="$1" profiles="$2" profile_json provider_packages provider_name provider command removal_policy
+  local inventory item refreshed id display_name state ownership status='[]' inventory_only degraded=false
+  local pending_file="$ROOT/.state/provider-status.pending.json"
+  load_builtin_provider
+  profile_json="$(jq -ce --arg profile "$PROFILE" '.[$profile] // empty' <<<"$profiles")" \
+    || fail "profile does not exist: $PROFILE"
+  provider_packages="$(jq -c '.providerPackages // {}' <<<"$profile_json")"
+  [[ "$(jq -r 'type' <<<"$provider_packages")" == object ]] \
+    || fail "profile $PROFILE has invalid providerPackages metadata"
+  (($(jq 'length' <<<"$provider_packages") > 0)) || {
+    if [[ "$mode" == apply ]]; then
+      mkdir -p "$ROOT/.state"
+      jq -n --arg profile "$PROFILE" \
+        '{schemaVersion: 1, profile: $profile, complete: true, degraded: false, items: []}' >"$pending_file"
+    fi
+    return 0
+  }
+
+  printf '\nProfile provider plan:\n'
+  while IFS= read -r provider_name; do
+    provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
+    [[ -n "$provider" ]] || fail "profile $PROFILE requires unavailable provider: $provider_name"
+    jq -e '.schemaVersion == 1 and (.capabilities | index("inventory")) and (.capabilities | index("install"))' \
+      >/dev/null <<<"$provider" || fail "provider $provider_name cannot reconcile profile applications"
+    command="$(jq -r '.executable' <<<"$provider")"
+    [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
+    removal_policy="$(jq -r '.removalPolicy // "remove"' <<<"$provider")"
+    [[ "$removal_policy" == remove || "$removal_policy" == retain ]] \
+      || fail "provider $provider_name has invalid removalPolicy"
+    inventory="$($command inventory)" || fail "provider inventory failed: $provider_name"
+    jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$inventory" \
+      || fail "provider $provider_name returned invalid inventory"
+
+    while IFS= read -r inventory_only; do
+      [[ -n "$inventory_only" ]] || continue
+      status="$(jq -cn --argjson items "$status" --argjson item "$inventory_only" \
+        --arg provider "$provider_name" --arg removalPolicy "$removal_policy" '
+          $items + [($item + {provider: $provider, requested: false, state: "inventory-only",
+            ownership: "provider", removalPolicy: $removalPolicy})]
+        ')"
+    done < <(jq -c '.items[] | select(.inventoryOnly == true)' <<<"$inventory")
+
+    while IFS= read -r id; do
+      [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider package id: $id"
+      [[ "$(jq --arg id "$id" '[.items[] | select(.id == $id)] | length' <<<"$inventory")" == 1 ]] \
+        || fail "provider $provider_name must expose exactly one inventory item for $id"
+      item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$inventory")"
+      display_name="$(jq -r '.name // .id' <<<"$item")"
+      if [[ "$(jq -r '.installed // false' <<<"$item")" == true ]]; then
+        state=preexisting
+        ownership=provider
+        printf '  [%-18s] %-24s already installed\n' "$provider_name" "$display_name"
+      else
+        "$command" plan --action install "$id" \
+          || fail "provider $provider_name could not plan installation of $id"
+        if [[ "$mode" == plan ]]; then
+          state=planned
+          ownership=none
+        elif confirm "Install $display_name through $provider_name?"; then
+          if ! "$command" apply --action install "$id"; then
+            state=failed
+            ownership=provider
+            status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+              --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
+              --arg removalPolicy "$removal_policy" '
+                $items + [($item + {provider: $provider, requested: true, state: $state,
+                  ownership: $ownership, removalPolicy: $removalPolicy})]
+              ')"
+            mkdir -p "$ROOT/.state"
+            jq -n --arg profile "$PROFILE" --argjson items "$status" \
+              '{schemaVersion: 1, profile: $profile, complete: false, degraded: true, items: $items}' \
+              >"$pending_file"
+            fail "provider $provider_name failed to install $id"
+          fi
+          refreshed="$($command inventory)" || fail "provider inventory failed after installing $id"
+          item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$refreshed")"
+          [[ "$(jq -r '.installed // false' <<<"$item")" == true ]] \
+            || fail "provider $provider_name did not verify $id after installation"
+          inventory="$refreshed"
+          state=installed
+          ownership=home-weave
+        else
+          state=declined
+          ownership=none
+          degraded=true
+          printf '  [%-18s] %-24s declined; profile will be marked degraded\n' "$provider_name" "$display_name"
+        fi
+      fi
+      status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+        --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
+        --arg removalPolicy "$removal_policy" '
+          $items + [($item + {provider: $provider, requested: true, state: $state,
+            ownership: $ownership, removalPolicy: $removalPolicy})]
+        ')"
+    done < <(jq -r --arg provider "$provider_name" '.[$provider][]' <<<"$provider_packages")
+  done < <(jq -r 'keys[]' <<<"$provider_packages")
+
+  if [[ "$mode" == apply ]]; then
+    mkdir -p "$ROOT/.state"
+    jq -n --arg profile "$PROFILE" --argjson degraded "$degraded" --argjson items "$status" \
+      '{schemaVersion: 1, profile: $profile, complete: true, degraded: $degraded, items: $items}' \
+      >"$pending_file.tmp.$$"
+    mv "$pending_file.tmp.$$" "$pending_file"
+  fi
+}
+
 show_profile_packages() {
   local file="$ROOT/nix/$PROFILE/profile.nix"
   printf '\nProfile configuration: %s\n' "$file"
@@ -1191,7 +1299,7 @@ profile_metadata() {
 
 record_receipt() {
   local receipts="$ROOT/.state/receipts" timestamp receipt temporary previous profiles system revision
-  local inventory='[]' preflight='{}' dotfiles='[]' casks='[]' providers='[]' parent_chain='[]' cursor parent
+  local inventory='[]' preflight='{}' dotfiles='[]' casks='[]' providers='[]' provider_status='{}' parent_chain='[]' cursor parent
   local current_generation previous_generation changes
   timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   receipt="$receipts/${timestamp//:/-}.json"
@@ -1218,10 +1326,11 @@ record_receipt() {
     casks="$(jq -Rsc 'split("\n") | map(select(length > 0) | {id: ., provider: "homebrew", repositoryTrust: "official Homebrew repository"})' \
       <"$ROOT/.state/installed-casks")"
   fi
-  if [[ -s "$ROOT/.state/provider-installations.tsv" ]]; then
-    providers="$(jq -Rsc 'split("\n") | map(select(length > 0) | split("\t") |
-      {provider: .[0], id: .[1], repositoryTrust: "provider-declared official repository"})' \
-      <"$ROOT/.state/provider-installations.tsv")"
+  if [[ -s "$ROOT/.state/provider-status.json" ]]; then
+    provider_status="$(<"$ROOT/.state/provider-status.json")"
+    jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$provider_status" \
+      || fail "invalid provider status state"
+    providers="$(jq -c '.items' <<<"$provider_status")"
   fi
   cursor="$PROFILE"
   while :; do
@@ -1235,29 +1344,34 @@ record_receipt() {
   previous=""
   [[ ! -L "$receipts/latest" ]] || previous="$(readlink -f "$receipts/latest" 2>/dev/null || true)"
   changes="$(jq -cn \
-    --argjson packages "$inventory" --argjson dotfiles "$dotfiles" \
+    --argjson packages "$inventory" --argjson providers "$providers" --argjson dotfiles "$dotfiles" \
     --slurpfile old "${previous:-/dev/null}" '
-      ($old[0] // {packages: [], dotfiles: []}) as $previous
+      ($old[0] // {packages: [], applications: {providers: []}, dotfiles: []}) as $previous
       | ($packages | map(.name)) as $newPackages
       | ($previous.packages | map(.name)) as $oldPackages
+      | ($providers | map("provider:" + .provider + ":" + .id)) as $newProviders
+      | (($previous.applications.providers // []) | map("provider:" + .provider + ":" + .id)) as $oldProviders
       | ($dotfiles | map(.destination)) as $newDots
       | ($previous.dotfiles | map(.destination)) as $oldDots
       | {
-          added: (($newPackages - $oldPackages) + ($newDots - $oldDots)),
-          removed: (($oldPackages - $newPackages) + ($oldDots - $newDots)),
-          retained: (($newPackages - ($newPackages - $oldPackages)) + ($newDots - ($newDots - $oldDots))),
+          added: (($newPackages - $oldPackages) + ($newProviders - $oldProviders) + ($newDots - $oldDots)),
+          removed: (($oldPackages - $newPackages) + ($oldProviders - $newProviders) + ($oldDots - $newDots)),
+          retained: (($newPackages - ($newPackages - $oldPackages))
+            + ($newProviders - ($newProviders - $oldProviders)) + ($newDots - ($newDots - $oldDots))),
           changed: [ $packages[] as $new | $previous.packages[]? | select(.name == $new.name and (.storePath != $new.storePath)) | $new.name ]
         }')"
   jq -n \
     --arg timestamp "$timestamp" --arg profile "$PROFILE" --argjson parentChain "$parent_chain" \
     --arg system "$system" --arg shell "$PRIMARY_SHELL" --arg revision "$revision" \
     --argjson packages "$inventory" --argjson preflight "$preflight" \
-    --argjson casks "$casks" --argjson providers "$providers" --argjson dotfiles "$dotfiles" --argjson changes "$changes" \
+    --argjson casks "$casks" --argjson providers "$providers" --argjson providerStatus "$provider_status" \
+    --argjson dotfiles "$dotfiles" --argjson changes "$changes" \
     --arg currentGeneration "$current_generation" --arg previousGeneration "$previous_generation" \
     '{schemaVersion: 1, timestamp: $timestamp, activeProfile: $profile,
       parentChain: $parentChain, system: $system, shell: $shell, nixpkgsRevision: $revision,
       packages: $packages, build: $preflight,
-      applications: {homebrew: $casks, native: [], providers: $providers}, dotfiles: $dotfiles,
+      applications: {homebrew: $casks, native: [], providers: $providers},
+      providerDegraded: ($providerStatus.degraded // false), dotfiles: $dotfiles,
       changes: $changes,
       rollback: {currentHomeManagerGeneration: $currentGeneration,
         previousHomeManagerGeneration: $previousGeneration, previousStowGeneration: "dotfiles/current.previous"}}' \
@@ -1269,7 +1383,8 @@ record_receipt() {
     "Installed packages:",
     (.packages[] | "  \(.name) \(.version) [\(.group // "profile")] \(.storePath) — \(.source)"),
     "Managed applications:",
-    (.applications[] | .[] | "  \(.provider // "native"): \(.id // .name)"),
+    (.applications[] | .[] | "  \(.provider // "native"): \(.id // .name) [\(.state // "installed")]"),
+    "Provider profile: \(if .providerDegraded then "degraded" else "complete" end)",
     "Managed dotfiles:",
     (.dotfiles[] | "  \(.destination) <- \(.source) [\(.sourceLayer)]"),
     "Changes: +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) retained \(.changes.retained | length)",
@@ -1305,6 +1420,7 @@ status_command() {
     "  Nixpkgs:        \(.nixpkgsRevision)",
     "  Packages:       \(.packages | length)",
     "  Managed apps:   \([.applications[] | length] | add)",
+    "  Provider state: \(if .providerDegraded then "degraded" else "complete" end)",
     "  Managed files:  \(.dotfiles | length)",
     "  Changes:        +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) =\(.changes.retained | length)",
     "  Rollback:       \(.rollback.previousHomeManagerGeneration // "none")"' "$receipt"
@@ -1334,7 +1450,7 @@ profile_command() {
       {
         printf '{\n  extends = "%s";\n' "$EXTENDS"
         printf '  shells = [ "zsh" ];\n  primaryShell = "zsh";\n'
-        printf '  packageGroups = [ ];\n  nixPackages = [ ];\n  homebrewCasks = [ ];\n  allowUnfree = [ ];\n}\n'
+        printf '  packageGroups = [ ];\n  nixPackages = [ ];\n  providerPackages = { };\n  homebrewCasks = [ ];\n  allowUnfree = [ ];\n}\n'
       } >"$file"
       printf 'Created profile %s extending %s.\n' "$name" "$EXTENDS"
       ;;
@@ -1361,7 +1477,15 @@ profile_command() {
           (((($new[$field] // []) - ($old[$field] // []))[]) | "+ " + .),
           (((($old[$field] // []) - ($new[$field] // []))[]) | "- " + .)' || true
       done
-      printf '\nProviders: no profile-specific provider changes\nDotfiles: layers are reconciled during switch\n'
+      printf '\nproviderPackages:\n'
+      jq -nr --argjson old "$current_json" --argjson new "$target_json" '
+        ((($old.providerPackages // {}) | keys) + (($new.providerPackages // {}) | keys) | unique)[] as $provider
+        | (((($new.providerPackages[$provider] // []) - ($old.providerPackages[$provider] // []))[])
+            | "+ [" + $provider + "] " + .),
+          (((($old.providerPackages[$provider] // []) - ($new.providerPackages[$provider] // []))[])
+            | "- [" + $provider + "] " + .)
+      ' || true
+      printf '\nDotfiles: layers are reconciled during switch\n'
       ;;
     switch)
       [[ -n "$name" ]] || fail "profile switch requires a name"; validate_name "$name"
@@ -1397,7 +1521,9 @@ run_profile_setup() {
   if [[ "$mode" == plan ]]; then
     HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
       bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only "${setup_args[@]}"
+    reconcile_profile_providers plan "$profiles"
   else
+    reconcile_profile_providers apply "$profiles"
     if ! prepare_adoptions; then
       restore_adoptions
       fail "could not stage adopted configurations"
@@ -1405,6 +1531,9 @@ run_profile_setup() {
     if HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
       bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" "${setup_args[@]}"; then
       : >"$ROOT/.state/adoptions"
+      if [[ -f "$ROOT/.state/provider-status.pending.json" ]]; then
+        mv "$ROOT/.state/provider-status.pending.json" "$ROOT/.state/provider-status.json"
+      fi
       date -u +%Y%m%dT%H%M%SZ >"$ROOT/.state/applied"
       write_state
       record_receipt
@@ -1483,21 +1612,31 @@ uninstall_recorded_casks() {
 }
 
 uninstall_recorded_providers() {
-  local record="$ROOT/.state/provider-installations.tsv" provider_name id provider command
-  [[ -s "$record" ]] || return 0
+  local status_file="$ROOT/.state/provider-status.json"
+  local provider_name id provider command item removal_policy ownership
   load_builtin_provider
-  while IFS=$'\t' read -r provider_name id; do
-    provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
-    if [[ -z "$provider" ]]; then warn "provider $provider_name is unavailable; recorded application $id was retained"; continue; fi
-    command="$(jq -r '.executable' <<<"$provider")"
-    if "$DRY_RUN"; then
+  if [[ -s "$status_file" ]]; then
+    while IFS= read -r item; do
+      provider_name="$(jq -r '.provider' <<<"$item")"
+      id="$(jq -r '.id' <<<"$item")"
+      removal_policy="$(jq -r '.removalPolicy // "remove"' <<<"$item")"
+      ownership="$(jq -r '.ownership // "provider"' <<<"$item")"
+      [[ "$removal_policy" != retain ]] || {
+        printf 'Retained provider-managed application: [%s] %s\n' "$provider_name" "$id"
+        continue
+      }
+      [[ "$ownership" == home-weave ]] || continue
+      provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
+      if [[ -z "$provider" ]] || ! jq -e '.capabilities | index("remove")' >/dev/null <<<"$provider"; then
+        warn "provider $provider_name cannot remove recorded application $id; it was retained"
+        continue
+      fi
+      command="$(jq -r '.executable' <<<"$provider")"
       "$command" plan --action remove "$id"
-    else
-      "$command" plan --action remove "$id"
-      "$command" apply --action remove "$id"
-    fi
-  done <"$record"
-  "$DRY_RUN" || rm -f "$record"
+      "$DRY_RUN" || "$command" apply --action remove "$id"
+    done < <(jq -c '.items[] | select(.requested == true and (.state == "installed" or .state == "preexisting"))' "$status_file")
+    "$DRY_RUN" || rm -f "$status_file" "$ROOT/.state/provider-status.pending.json"
+  fi
 }
 
 uninstall_command() {
@@ -1814,7 +1953,7 @@ update_command() {
 }
 
 provider_command() {
-  local action="${POSITIONAL_ARGS[0]:-list}" provider_name="${POSITIONAL_ARGS[1]:-}" provider command capabilities id record temporary installed_before=""
+  local action="${POSITIONAL_ARGS[0]:-list}" provider_name="${POSITIONAL_ARGS[1]:-}" provider command capabilities removal_policy
   require_commands jq
   load_builtin_provider
   jq -e 'type == "array"' >/dev/null <<<"$EXTENSIONS_JSON" || fail "invalid extension manifest"
@@ -1827,33 +1966,20 @@ provider_command() {
   [[ -n "$provider" ]] || fail "unknown provider: $provider_name"
   jq -e '.schemaVersion == 1' >/dev/null <<<"$provider" || fail "unsupported provider schema"
   command="$(jq -r '.executable' <<<"$provider")"
+  removal_policy="$(jq -r '.removalPolicy // "remove"' <<<"$provider")"
   capabilities="$(jq -r '.capabilities[]' <<<"$provider")"
   grep -Fxq "$action" <<<"$capabilities" || fail "$provider_name does not support $action"
   [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
   if [[ "$action" == install || "$action" == update || "$action" == remove ]]; then
-    if [[ "$action" == install ]] && grep -Fxq inventory <<<"$capabilities"; then
-      installed_before="$("$command" inventory 2>/dev/null \
-        | jq -r '.items[]? | select(.installed == true) | .id' 2>/dev/null || true)"
-    fi
     "$command" plan --action "$action" "${POSITIONAL_ARGS[@]:2}"
     confirm "Allow $provider_name to $action the selected applications?" || fail "provider action declined"
     "$command" apply --action "$action" "${POSITIONAL_ARGS[@]:2}"
-    record="$ROOT/.state/provider-installations.tsv"
-    mkdir -p "$ROOT/.state"
     if [[ "$action" == install ]]; then
-      touch "$record"
-      for id in "${POSITIONAL_ARGS[@]:2}"; do
-        grep -Fxq "$id" <<<"$installed_before" && continue
-        grep -Fqx "$provider_name"$'\t'"$id" "$record" || printf '%s\t%s\n' "$provider_name" "$id" >>"$record"
-      done
-    elif [[ "$action" == remove && -f "$record" ]]; then
-      temporary="$record.tmp.$$"
-      cp "$record" "$temporary"
-      for id in "${POSITIONAL_ARGS[@]:2}"; do
-        grep -Fvx "$provider_name"$'\t'"$id" "$temporary" >"$record" || true
-        cp "$record" "$temporary"
-      done
-      rm -f "$temporary"
+      if [[ "$removal_policy" == retain ]]; then
+        printf 'Provider %s retains lifecycle ownership; installed applications will not be removed by HomeWeave.\n' "$provider_name"
+      else
+        printf 'Provider action completed. Profile-owned installation receipts are written only by profile apply.\n'
+      fi
     fi
   else
     exec "$command" "$action" "${POSITIONAL_ARGS[@]:2}"

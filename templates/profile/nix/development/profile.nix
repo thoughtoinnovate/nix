@@ -5,6 +5,7 @@
   development = true;
   packageGroups = [ ];
   nixPackages = [ ];
+  providerPackages = { };
   homebrewCasks = [ ];
   allowUnfree = [ ];
 }

@@ -29,5 +29,14 @@
       "fromSource"
     ],
     "evidence": "Reviewed Nixpkgs recipe builds fixed-hash source from the official anomalyco/opencode repository"
+  },
+  {
+    "package": "awscli2",
+    "publisher": "Amazon Web Services",
+    "homepagePrefixes": [
+      "https://aws.amazon.com/cli/"
+    ],
+    "requiredProvenance": [],
+    "evidence": "Reviewed Nixpkgs package metadata points to the official AWS CLI product and uses pinned Nixpkgs sources"
   }
 ]

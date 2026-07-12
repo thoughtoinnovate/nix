@@ -82,6 +82,7 @@ Groups can also be changed later through `packageGroups` in
     "cloud"
   ];
   nixPackages = [ ];
+  providerPackages = { };
   homebrewCasks = [ ];
   allowUnfree = [ "terraform" ];
 }
@@ -99,6 +100,13 @@ Available groups are:
 - `desktop`: VS Code. Add other desktop applications explicitly.
 
 Run `plan` and `apply` again after editing a profile.
+
+Private work distributions can expose reviewed provider applications through
+`providerPackages`, keyed by the provider name. HomeWeave inventories them,
+shows the provider plan, and asks before each missing application is installed.
+Provider trust and lifecycle policy are displayed separately from publisher
+verification. Applications from a retain-policy MDM provider remain managed by
+that MDM and are reported as retained during uninstall and nuke.
 
 ## Work with multiple profiles
 
