@@ -33,6 +33,10 @@ grep -Fq 'shells = [ "fish" "zsh" ];' "$ROOT/nix/work/profile.nix"
 grep -Fq 'packageGroups = [ "cloud" ];' "$ROOT/nix/work/profile.nix"
 grep -Fq 'nixPackages = [ ];' "$ROOT/nix/work/profile.nix"
 
+# A new named profile inherits base unless --extends selects another parent.
+run_cli setup --yes --no-git --no-apply --profile personal --shell zsh
+grep -Fq 'extends = "base";' "$ROOT/nix/personal/profile.nix"
+
 printf 'old setup\n' >"$ROOT/old-marker"
 run_cli setup --yes --no-git --no-apply --profile base --shell zsh
 backup_marker="$(find "$ROOT/backup" -name old-marker -print -quit)"
@@ -151,6 +155,13 @@ test -d "$ROOT"
 run_cli uninstall --profile development --dry-run | grep -Fq 'inactive'
 run_cli uninstall --all --dry-run --yes | grep -Fq 'Repository retained'
 run_cli uninstall --nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
+run_cli uninstall nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
+run_cli uninstall all --dry-run --yes | grep -Fq 'Repository retained'
+if run_cli uninstall unexpected --dry-run --yes 2>"$TEST_ROOT/uninstall-mode-error"; then
+  printf 'expected an unknown uninstall mode to fail\n' >&2
+  exit 1
+fi
+grep -Fq 'unknown uninstall mode: unexpected' "$TEST_ROOT/uninstall-mode-error"
 test -d "$ROOT"
 
 printf 'HomeWeave CLI tests passed.\n'

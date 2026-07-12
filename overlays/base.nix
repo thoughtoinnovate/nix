@@ -25,6 +25,8 @@ let
       export HOME_WEAVE_PROFILE_TEMPLATE="''${HOME_WEAVE_PROFILE_TEMPLATE:-${../templates/profile}}"
       export HOME_WEAVE_BUNDLED_DOTFILES="''${HOME_WEAVE_BUNDLED_DOTFILES:-${../dotfiles}}"
       export HOME_WEAVE_PACKAGE_PREVIEW="''${HOME_WEAVE_PACKAGE_PREVIEW:-${../lib/package-preview.sh}}"
+      export HOME_WEAVE_PUBLISHER_REGISTRY="''${HOME_WEAVE_PUBLISHER_REGISTRY:-${../lib/reviewed-publishers.json}}"
+      export HOME_WEAVE_PUBLISHER_FILTER="''${HOME_WEAVE_PUBLISHER_FILTER:-${../lib/verify-publishers.jq}}"
       export HOME_WEAVE_NATIVE_PROVIDER="''${HOME_WEAVE_NATIVE_PROVIDER:-${../lib/native-provider.sh}}"
       export HOME_WEAVE_PREFLIGHT_REPORTER="''${HOME_WEAVE_PREFLIGHT_REPORTER:-${../lib/preflight-report.sh}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"

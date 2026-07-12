@@ -3,7 +3,7 @@
 set -eu
 
 row="${1:-}"
-IFS=$'\t' read -r _display package version upstream maintainers distribution verification official license description <<<"$row"
+IFS=$'\t' read -r _display package version upstream maintainers distribution verification official license description publisher publisher_evidence <<<"$row"
 
 green='\033[32m'
 red='\033[31m'
@@ -11,7 +11,7 @@ yellow='\033[33m'
 reset='\033[0m'
 
 case "$verification" in
-  verified) verification_label="${green}🟢 Verified publisher${reset}" ;;
+  verified) verification_label="${green}🟢 ${publisher:-Upstream} verified${reset}" ;;
   *) verification_label="${red}🔴 Unverified publisher${reset}" ;;
 esac
 
@@ -32,6 +32,9 @@ printf 'Upstream/author: %s\n' "${upstream:-not declared}"
 printf 'Nix maintainers: %s\n' "${maintainers:-not declared}"
 printf 'Package type:    %s\n' "$distribution_label"
 printf 'Publisher:       %b\n' "$verification_label"
+if [[ -n "${publisher_evidence:-}" ]]; then
+  printf 'Evidence:        %s\n' "$publisher_evidence"
+fi
 printf 'Official status: %b\n' "$official_label"
 printf 'License:         %s\n' "${license:-unknown}"
 printf '\n%s\n' "${description:-No description provided.}"

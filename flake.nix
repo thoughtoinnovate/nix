@@ -304,6 +304,17 @@
                   bash ${./tests/test-preflight-parser.sh} ${./lib/preflight-report.sh}
                   touch $out
                 '';
+
+            publisher-verification =
+              pkgs.runCommand "publisher-verification-tests"
+                {
+                  nativeBuildInputs = [ pkgs.jq ];
+                }
+                ''
+                  bash ${./tests/test-publisher-verification.sh} \
+                    ${./lib/verify-publishers.jq} ${./lib/reviewed-publishers.json}
+                  touch $out
+                '';
           };
         }
       )

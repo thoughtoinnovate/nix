@@ -84,13 +84,21 @@ dotfiles, and preflights Stow before activation. Existing roots are replaced
 only after confirmation and are retained under `backup/<timestamp>`; failures
 restore the original root.
 
+When setup is interactive, selecting an existing profile offers to use it
+directly or create a child profile. New profiles extend `base` by default;
+enter `development` at the parent prompt to inherit the lean development
+profile. Non-interactive setup uses `--profile NAME --extends base|development`.
+
 The optional-package checklist uses arrow keys to move, Space to toggle any
 number of entries, and Enter to confirm the selected set.
 
 Nixpkgs search results show the declared upstream homepage, Nixpkgs maintainer
-handles, license, and description in a preview panel. Nixpkgs does not provide
-verified publisher identity, so HomeWeave labels official status as unverified
-unless a trusted organization provider explicitly supplies verification.
+handles, license, and description in a preview panel. Nixpkgs repository trust
+does not by itself verify the upstream publisher. HomeWeave shows a green
+publisher label only when the package name, pinned metadata, source provenance,
+and a reviewed rule in `lib/reviewed-publishers.json` match. The preview and
+final confirmation show the reviewed evidence; all other publishers remain
+red and unverified.
 Users may search multiple keywords in one setup session; selections accumulate
 across searches and are shown in one final provenance table for confirmation
 before the profile is changed. Packages already supplied by the selected

@@ -16,6 +16,8 @@ TEMPLATE="${HOME_WEAVE_PROFILE_TEMPLATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" &
 PROFILE_OVERLAY="${HOME_WEAVE_PROFILE_OVERLAY:-}"
 BUNDLED_DOTFILES="${HOME_WEAVE_BUNDLED_DOTFILES:-}"
 PACKAGE_PREVIEW="${HOME_WEAVE_PACKAGE_PREVIEW:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/package-preview.sh}"
+PUBLISHER_REGISTRY="${HOME_WEAVE_PUBLISHER_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/reviewed-publishers.json}"
+PUBLISHER_FILTER="${HOME_WEAVE_PUBLISHER_FILTER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/verify-publishers.jq}"
 EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[] }"
 ASSUME_YES=false
 APPLY_NOW=""
@@ -66,7 +68,7 @@ Usage:
   home-weave status [--profile NAME] [--json]
   home-weave restore [GIT_URL] [--merge|--override] [--root PATH]
   home-weave sync [--root PATH]
-  home-weave uninstall [options]
+  home-weave uninstall [all|nuke] [options]
   home-weave provider list|inventory|search|install|update|remove|status ...
   home-weave extension list|NAME [arguments...]
 
@@ -210,6 +212,29 @@ parse_common_options() {
   done
 }
 
+normalize_uninstall_mode() {
+  local mode
+  ((${#POSITIONAL_ARGS[@]} > 0)) || return 0
+  mode="${POSITIONAL_ARGS[0]}"
+  case "$mode" in
+    all)
+      ((${#POSITIONAL_ARGS[@]} == 1)) \
+        || fail "uninstall all does not accept additional positional arguments"
+      UNINSTALL_ALL=true
+      ;;
+    nuke)
+      ((${#POSITIONAL_ARGS[@]} == 1)) \
+        || fail "uninstall nuke does not accept additional positional arguments"
+      UNINSTALL_NUKE=true
+      UNINSTALL_ALL=true
+      ;;
+    *)
+      fail "unknown uninstall mode: $mode (use uninstall, uninstall all, uninstall nuke, or --profile NAME)"
+      ;;
+  esac
+  POSITIONAL_ARGS=()
+}
+
 require_commands() {
   local command
   for command in "$@"; do
@@ -339,9 +364,41 @@ read_state() {
 }
 
 choose_profile() {
-  local choice custom parent profiles
+  local choice custom parent profiles answer
   if [[ -n "$PROFILE" ]]; then
     validate_name "$PROFILE"
+    if [[ -f "$ROOT/nix/$PROFILE/profile.nix" && -t 0 && "$ASSUME_YES" == false ]]; then
+      printf "Profile '%s' already exists. Use it directly or create a child profile? [use/create] [use]: " "$PROFILE"
+      read -r answer
+      case "$answer" in
+        create|c|C)
+          printf 'New profile name: '
+          read -r custom
+          validate_name "$custom"
+          [[ ! -e "$ROOT/nix/$custom/profile.nix" ]] || fail "profile already exists: $custom"
+          printf 'Extend profile [base] (enter development to inherit development tools): '
+          read -r parent
+          parent="${parent:-base}"
+          validate_name "$parent"
+          [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
+          PROFILE="$custom"
+          EXTENDS="$parent"
+          printf "Creating profile '%s' extending '%s'.\n" "$PROFILE" "$EXTENDS"
+          ;;
+        use|u|U|"")
+          printf "Using existing profile '%s'.\n" "$PROFILE"
+          ;;
+        *) fail "choose 'use' or 'create'" ;;
+      esac
+    elif [[ ! -f "$ROOT/nix/$PROFILE/profile.nix" && -t 0 && "$ASSUME_YES" == false ]]; then
+      printf "Creating new profile '%s'. Extend profile [base] (enter development to inherit development tools): " "$PROFILE"
+      read -r parent
+      parent="${parent:-base}"
+      validate_name "$parent"
+      [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
+      EXTENDS="$parent"
+      printf "Creating profile '%s' extending '%s'.\n" "$PROFILE" "$EXTENDS"
+    fi
     return
   fi
   if [[ ! -t 0 ]]; then PROFILE=base; return; fi
@@ -356,20 +413,13 @@ choose_profile() {
   case "$choice" in
     '+ create custom profile'|custom)
       printf 'Custom profile name: '; read -r custom; validate_name "$custom"
-      printf 'Extend profile [base]: '; read -r parent; parent="${parent:-base}"; validate_name "$parent"
+      printf 'Extend profile [base] (enter development to inherit development tools): '
+      read -r parent
+      parent="${parent:-base}"
+      validate_name "$parent"
+      [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
       PROFILE="$custom"
-      mkdir -p "$ROOT/nix/$PROFILE"
-      cat >"$ROOT/nix/$PROFILE/profile.nix" <<EOF
-{
-  extends = "$parent";
-  shells = [ "zsh" ];
-  primaryShell = "zsh";
-  packageGroups = [ ];
-  nixPackages = [ ];
-  homebrewCasks = [ ];
-  allowUnfree = [ ];
-}
-EOF
+      EXTENDS="$parent"
       ;;
     "") PROFILE=base ;;
     *) validate_name "$choice"; [[ -f "$ROOT/nix/$choice/profile.nix" ]] || fail "profile does not exist: $choice"; PROFILE="$choice" ;;
@@ -564,21 +614,9 @@ accept_unfree_packages() {
 }
 
 apply_reviewed_upstream_allowlist() {
-  jq '
-    with_entries(
-      (.key | split(".") | .[2:] | join(".")) as $package
-      | if $package == "claude-code"
-          and ((.value.homepage // "") | startswith("https://github.com/anthropics/claude-code"))
-          and ((.value.provenance // []) | index("binaryNativeCode") != null)
-        then .value += {
-          publisher: "Anthropic",
-          publisherVerified: true,
-          publisherEvidence: "Vendor binary from downloads.claude.ai, checksum-pinned by Nixpkgs"
-        }
-        else .value += {publisherVerified: false}
-        end
-    )
-  '
+  [[ -r "$PUBLISHER_REGISTRY" && -r "$PUBLISHER_FILTER" ]] \
+    || fail "reviewed publisher verification data is unavailable"
+  jq --slurpfile registry "$PUBLISHER_REGISTRY" -f "$PUBLISHER_FILTER"
 }
 
 pinned_nixpkgs_ref() {
@@ -837,7 +875,7 @@ select_optional_packages() {
             --argjson existing "$selection_metadata" \
             --argjson incoming "$normalized_metadata" \
             '$existing * $incoming')"
-          printf 'Repository trust: official NixOS package repository. Upstream publisher identity remains unverified.\n'
+          printf 'Repository trust: official NixOS package repository. Green publishers match HomeWeave-reviewed upstream evidence; all others remain unverified.\n'
           already_included="$(jq -r 'keys[] | split(".") | .[2:] | join(".")' <<<"$results" \
             | while IFS= read -r package; do
                 grep -Fxq "$package" <<<"$DEFAULT_PACKAGE_IDS" && printf '%s\n' "$package"
@@ -875,16 +913,19 @@ select_optional_packages() {
                   fi
                   display="$(printf '%-38.38s %-11.11s %-22.22s %-19.19s ' \
                     "$package" "$version" "$author" '🏢 Official Nixpkgs')"
+                  publisher="$(jq -r --arg package "$package" '.[$package].publisher // "Upstream"' <<<"$normalized_metadata")"
+                  publisher_evidence="$(jq -r --arg package "$package" '.[$package].publisherEvidence // ""' <<<"$normalized_metadata")"
                   if [[ "$(jq -r --arg package "$package" '.[$package].publisherVerified // false' <<<"$normalized_metadata")" == true ]]; then
-                    display+=$'\033[32m🟢 Anthropic verified\033[0m'
+                    display+="$(printf '\033[32m🟢 %s verified\033[0m' "$publisher")"
                     verification="verified"
                   else
                     display+=$'\033[31m🔴 Upstream unverified\033[0m'
                     verification="unverified"
                   fi
-                  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
                     "$display" "$package" "$version" "$upstream" "$maintainers" \
-                    "official NixOS package repository" "$verification" "true" "$license" "$description"
+                    "official NixOS package repository" "$verification" "true" "$license" "$description" \
+                    "$publisher" "$publisher_evidence"
                 fi
               done || true)"
           if [[ -n "$search_rows" ]]; then
@@ -1764,6 +1805,7 @@ extension_command() {
 
 POSITIONAL_ARGS=()
 parse_common_options "$@"
+[[ "$COMMAND" != uninstall ]] || normalize_uninstall_mode
 normalize_root
 
 case "$COMMAND" in
