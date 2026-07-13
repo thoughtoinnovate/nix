@@ -1,0 +1,4 @@
+# HomeWeave non-secret environment variables.
+# Use strict NAME=VALUE lines. Values are literal and shell syntax is not run.
+# Organization or personal profiles may add values here, for example:
+# EDITOR=nvim

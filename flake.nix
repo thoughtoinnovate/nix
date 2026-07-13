@@ -182,6 +182,7 @@
               neovim
               starship
               stow
+              home-weave-env
               ;
 
             home-weave = pkgs.home-weave-cli;
@@ -317,7 +318,25 @@
                 }
                 ''
                   bash ${./tests/test-home-weave-cli.sh} \
-                    ${./home-weave.sh} ${./templates/profile}
+                    ${./home-weave.sh} ${./templates/profile} ${./lib/home-weave-env.sh}
+                  touch $out
+                '';
+
+            home-weave-env =
+              pkgs.runCommand "home-weave-env-tests"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    coreutils
+                    fish
+                    jq
+                    nushell
+                    zsh
+                  ];
+                }
+                ''
+                  bash ${./tests/test-home-weave-env.sh} \
+                    ${./lib/home-weave-env.sh} ${./dotfiles}
                   touch $out
                 '';
 
@@ -388,6 +407,7 @@
           "git"
           "gnumake"
           "home-weave-cli"
+          "home-weave-env"
           "neovim"
           "nodejs"
           "python3"

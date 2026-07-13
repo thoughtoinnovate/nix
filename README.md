@@ -18,6 +18,13 @@ This repository is the public base layer. Personal and organization-specific
 repositories should consume it as a flake input and add their own overlays or
 modules. Credentials and proprietary source code do not belong here.
 
+The base includes a shell-neutral `~/.home_weave_profile` template for managed
+non-secret environment variables and an optional, machine-local
+`~/.home_weave_secrets` convention. `home-weave-env` safely renders their
+literal `NAME=VALUE` entries for Bash, Zsh, Fish, or Nushell and requires the
+secrets file to be user-owned, non-symlinked, and mode `0600`. HomeWeave never
+adopts or records that secrets file; see the quick-start guide for usage.
+
 ## Profiles
 
 - `base`: HomeWeave, selected shells, Git, Stow, Starship, Neovim, and its
@@ -123,6 +130,8 @@ home-weave profile diff work
 home-weave profile switch work
 home-weave status
 home-weave status --json
+home-weave snapshot create ~/home-weave-snapshot
+home-weave snapshot restore ~/home-weave-snapshot --root ~/.home-weave-restored
 home-weave restore git@gitlab.com:group/my-home-weave.git
 home-weave sync
 home-weave uninstall

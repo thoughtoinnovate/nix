@@ -15,10 +15,28 @@ Use exactly one shell package: `bash`, `zsh`, `fish`, or `nushell`. The Nix
 bootstrap script simulates Stow first and stops if an existing file would be
 overwritten.
 
-Credentials are never stored here. Keep machine-local secrets in
-`~/.secrets`, tool-specific credential stores, or an organization-approved
-secret manager. Shell startup files deliberately do not load `~/.secrets`
-automatically.
+Credentials are never stored here. HomeWeave uses two shell-neutral files:
+
+- `~/.home_weave_profile` is managed configuration for non-secret
+  `NAME=VALUE` entries.
+- `~/.home_weave_secrets` is an optional machine-local file for secrets that
+  intentionally need to be inherited by every shell child process.
+
+The secrets file is never supplied, adopted, backed up, or recorded by
+HomeWeave. If used, it must be a regular, non-symlink file owned by the current
+user with mode `0600`:
+
+```sh
+umask 077
+touch ~/.home_weave_secrets
+chmod 600 ~/.home_weave_secrets
+```
+
+Both files use strict `NAME=VALUE` syntax. A leading `export ` is accepted for
+migration, but values are literal: command substitution and backticks are
+rejected. Bash, Zsh, Fish, and Nushell receive native environment updates.
+Prefer a secret manager for credentials that should only be exposed to one
+command rather than every process started by the shell.
 
 ## Neovim
 
@@ -55,8 +73,9 @@ files. Supported extension locations include:
 
 For example, the private repository can contain
 `work/.config/shell/conf.d/work.sh`. Keep credentials out of both repositories;
-the extension files may reference local credential stores without committing
-their values.
+extension files may add non-secret values to `.home_weave_profile` or reference
+local credential stores without committing their values. Never add
+`.home_weave_secrets` to a dotfile layer.
 
 The `nvim` package owns the canonical public configuration at
 `~/.config/nvim`. The Nix profile framework can merge or replace that subtree

@@ -56,6 +56,37 @@ Check what HomeWeave installed:
 ~/.home-weave/home-weave status --json
 ```
 
+## Configure shared environment variables
+
+HomeWeave provides one shell-neutral source for Bash, Zsh, Fish, and Nushell.
+Put non-secret values in the managed `~/.home_weave_profile` file using strict
+`NAME=VALUE` lines:
+
+```dotenv
+VAULT_ADDR=https://vault.example.com:8200
+WORK_REGION=us-east-1
+```
+
+Values are literal; they are converted to each shell's native syntax without
+evaluating shell expressions. A leading `export ` is accepted when migrating
+an existing Bash profile.
+
+For a secret that intentionally needs to be available to every process started
+by your shell, create the separate machine-local file:
+
+```sh
+umask 077
+touch ~/.home_weave_secrets
+chmod 600 ~/.home_weave_secrets
+$EDITOR ~/.home_weave_secrets
+```
+
+Use the same `NAME=VALUE` format. HomeWeave refuses to load this file when it is
+a symlink, owned by another user, or not exactly mode `0600`; it never adopts,
+backs up, commits, or records the file. Prefer a secret manager when a credential
+should be exposed only to one command. Open a new shell after changing either
+file.
+
 ## Add optional toolchains
 
 Keep `development` lean and add large toolchains through the interactive
@@ -141,6 +172,35 @@ that still have children cannot be deleted.
 Review the `flake.lock` change before applying or committing it. If activation
 fails, downloaded Nix store paths remain cached, while the active profile,
 dotfiles, and latest successful receipt remain unchanged.
+
+## Create or restore a portable snapshot
+
+Export the active HomeWeave repository, resolved package/application inventory,
+profiles, managed dotfiles, and canonical non-secret environment:
+
+```sh
+~/.home-weave/home-weave snapshot create ~/home-weave-snapshot
+```
+
+HomeWeave also inventories unrelated entries from the user's Nix profile, but
+marks them informational and does not silently take ownership of or reapply
+them. Shell `export NAME=VALUE` entries already present in the running
+environment are converted into `.home_weave_profile`; machine-specific values
+such as `PATH` are omitted.
+
+Secret values are never copied. The snapshot contains only
+`metadata/home_weave_secrets.example`, listing redacted variable names to
+restore through an approved secret manager. On the same or a new machine:
+
+```sh
+home-weave snapshot restore ~/home-weave-snapshot \
+  --root ~/.home-weave-restored
+~/.home-weave-restored/home-weave plan
+~/.home-weave-restored/home-weave apply
+```
+
+Restore requires an absent or empty target and does not activate by default.
+Use `--apply` only when an interactive plan-and-confirm flow is desired.
 
 ## Uninstall safely
 

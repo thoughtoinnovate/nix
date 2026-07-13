@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 CLI="$(realpath "$1")"
 TEMPLATE="$(realpath "$2")"
+ENV_RENDERER="$(realpath "$3")"
 TEST_ROOT="$(realpath "$(mktemp -d)")"
 TEST_HOME="$TEST_ROOT/home"
 mkdir -p "$TEST_HOME"
@@ -13,6 +14,7 @@ run_cli() {
   HOME="$TEST_HOME" \
     HOME_WEAVE_PROFILE_TEMPLATE="$TEMPLATE" \
     HOME_WEAVE_BASE_URL="github:thoughtoinnovate/nix" \
+    HOME_WEAVE_ENV_RENDERER="$ENV_RENDERER" \
     HOME_WEAVE_EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[]}" \
     PROVIDER_LOG="${PROVIDER_LOG:-}" \
     bash "$CLI" "$@"
@@ -80,6 +82,53 @@ jq -n '{schemaVersion: 1, timestamp: "2026-07-12T00:00:00Z", activeProfile: "bas
   >"$ROOT/.state/receipts/fixture.json"
 ln -s fixture.json "$ROOT/.state/receipts/latest"
 run_cli status --json | jq -e '.activeProfile == "base" and .nixpkgsRevision == "fixture"' >/dev/null
+
+# Snapshots preserve declarative HomeWeave state, canonicalize safe exports,
+# and include only redacted secret variable names.
+cat >"$TEST_HOME/.home_weave_profile" <<'EOF'
+WORK_REGION=us-east-1
+EOF
+cat >"$TEST_HOME/.home_weave_secrets" <<'EOF'
+OPEN_AI_API_KEY=must-never-enter-the-snapshot
+EOF
+chmod 0600 "$TEST_HOME/.home_weave_secrets"
+printf 'export VAULT_ADDR=https://vault.example.invalid:8200\n' >"$TEST_HOME/.bash_profile"
+export VAULT_ADDR=https://vault.example.invalid:8200
+snapshot_bin="$TEST_ROOT/snapshot-bin"
+mkdir -p "$snapshot_bin"
+cat >"$snapshot_bin/nix" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-} ${2:-}" == "profile list" ]]; then
+  printf '%s\n' '{"packages":{"storePaths":["/nix/store/example"],"originalUrl":"nixpkgs#example"}}'
+elif [[ "$*" == *lib.setup.profiles* ]]; then
+  printf '%s\n' '{"base":{"extends":null,"shells":["zsh"],"primaryShell":"zsh"}}'
+else
+  exit 1
+fi
+EOF
+chmod +x "$snapshot_bin/nix"
+SNAPSHOT="$TEST_HOME/portable-snapshot"
+PATH="$snapshot_bin:$PATH" run_cli snapshot create "$SNAPSHOT"
+test -f "$SNAPSHOT/snapshot.json"
+grep -Fqx 'WORK_REGION=us-east-1' "$SNAPSHOT/dotfiles/custom/.home_weave_profile"
+grep -Fqx 'VAULT_ADDR=https://vault.example.invalid:8200' "$SNAPSHOT/dotfiles/custom/.home_weave_profile"
+grep -Fqx 'OPEN_AI_API_KEY=' "$SNAPSHOT/metadata/home_weave_secrets.example"
+if rg -n 'must-never-enter-the-snapshot' "$SNAPSHOT"; then
+  printf 'snapshot leaked a secret value\n' >&2
+  exit 1
+fi
+test -z "$(find "$SNAPSHOT" -name .home_weave_secrets -print -quit)"
+jq -e '.portability.secretValuesIncluded == false and
+  .observedExternalNixProfile[0].name == "packages"' "$SNAPSHOT/snapshot.json" >/dev/null
+
+RESTORED="$TEST_HOME/restored-home-weave"
+run_cli snapshot restore "$SNAPSHOT" --root "$RESTORED"
+test -f "$RESTORED/flake.nix"
+test -f "$RESTORED/snapshot.json"
+test ! -e "$RESTORED/metadata"
+test ! -e "$RESTORED/.state/active-profile"
+test "$(<"$RESTORED/.state/selected-profile")" = base
+test "$(<"$RESTORED/.state/primary-shell")" = zsh
 
 # A backend failure must not advance the active profile, dotfile generation,
 # applied marker, or latest receipt.

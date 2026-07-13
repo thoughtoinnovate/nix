@@ -18,6 +18,7 @@ BUNDLED_DOTFILES="${HOME_WEAVE_BUNDLED_DOTFILES:-}"
 PACKAGE_PREVIEW="${HOME_WEAVE_PACKAGE_PREVIEW:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/package-preview.sh}"
 PUBLISHER_REGISTRY="${HOME_WEAVE_PUBLISHER_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/reviewed-publishers.json}"
 PUBLISHER_FILTER="${HOME_WEAVE_PUBLISHER_FILTER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/verify-publishers.jq}"
+ENV_RENDERER="${HOME_WEAVE_ENV_RENDERER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/home-weave-env.sh}"
 EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[] }"
 ASSUME_YES=false
 APPLY_NOW=""
@@ -66,6 +67,8 @@ Usage:
   home-weave update [--root PATH]
   home-weave profile list|show|create|diff|switch|delete ...
   home-weave status [--profile NAME] [--json]
+  home-weave snapshot create [PATH] [--root PATH]
+  home-weave snapshot restore PATH [--root PATH] [--apply]
   home-weave restore [GIT_URL] [--merge|--override] [--root PATH]
   home-weave sync [--root PATH]
   home-weave uninstall [all|nuke] [options]
@@ -1183,6 +1186,7 @@ scan_dotfiles() {
   : >"$ROOT/.state/adoptions"
   for candidate in \
     "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.zshrc" "$HOME/.gitconfig" \
+    "$HOME/.home_weave_profile" \
     "$HOME/.config"/* "$HOME/.configs"/*; do
     [[ -e "$candidate" || -L "$candidate" ]] || continue
     [[ "$candidate" != "$ROOT"* ]] || continue
@@ -1424,6 +1428,173 @@ status_command() {
     "  Managed files:  \(.dotfiles | length)",
     "  Changes:        +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) =\(.changes.retained | length)",
     "  Rollback:       \(.rollback.previousHomeManagerGeneration // "none")"' "$receipt"
+}
+
+is_sensitive_environment_name() {
+  [[ "$1" =~ (TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL) ]]
+}
+
+is_machine_environment_name() {
+  [[ "$1" =~ ^(PATH|HOME|USER|LOGNAME|SHELL|PWD|OLDPWD|SHLVL|TMPDIR|TERM|TERM_PROGRAM|SSH_.*|NIX_.*|__CF_.*)$ ]]
+}
+
+portable_path() {
+  local path="$1" parent
+  case "$path" in
+    \~/*) path="$HOME/${path#\~/}" ;;
+    /*) ;;
+    *) path="$PWD/$path" ;;
+  esac
+  [[ "$path" != / && "$path" != "$HOME" ]] || fail "refusing unsafe snapshot path: $path"
+  parent="$(dirname "$path")"
+  [[ -d "$parent" ]] || fail "snapshot parent directory does not exist: $parent"
+  printf '%s/%s\n' "$(realpath "$parent")" "$(basename "$path")"
+}
+
+snapshot_environment() {
+  local destination="$1" profile_document='{}' secret_document='{}' shell_document='{}'
+  local file line key value public_document secret_keys='[]' profile_file secret_template
+  [[ -r "$ENV_RENDERER" ]] || fail "HomeWeave environment renderer is unavailable"
+  profile_document="$(bash "$ENV_RENDERER" render json "$HOME/.home_weave_profile")" \
+    || fail "could not canonicalize ~/.home_weave_profile"
+  secret_document="$(bash "$ENV_RENDERER" render json "$HOME/.home_weave_secrets")" \
+    || fail "could not safely inspect ~/.home_weave_secrets"
+  secret_keys="$(jq -c 'keys' <<<"$secret_document")"
+
+  # Migrate only exported values already present in the running environment.
+  # Raw shell files are never evaluated by snapshot creation.
+  for file in "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [[ -r "$file" ]] || continue
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*export[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)= ]] || continue
+      key="${BASH_REMATCH[1]}"
+      printenv "$key" >/dev/null 2>&1 || continue
+      is_machine_environment_name "$key" && continue
+      value="$(printenv "$key")"
+      if is_sensitive_environment_name "$key"; then
+        secret_keys="$(jq -cn --argjson keys "$secret_keys" --arg key "$key" '$keys + [$key] | unique')"
+      elif [[ "$value" == *$'\n'* || "$value" == *$'\t'* || "$value" == *'`'* || "$value" == *'$('* ]]; then
+        warn "snapshot skipped shell export $key because its value is not canonical-safe"
+      else
+        shell_document="$(jq -cn --argjson current "$shell_document" --arg key "$key" --arg value "$value" \
+          '$current + {($key): $value}')"
+      fi
+    done <"$file"
+  done
+
+  # Any secret-like name accidentally placed in the non-secret profile is
+  # redacted into the template instead of being copied with its value.
+  while IFS= read -r key; do
+    if is_sensitive_environment_name "$key"; then
+      secret_keys="$(jq -cn --argjson keys "$secret_keys" --arg key "$key" '$keys + [$key] | unique')"
+      profile_document="$(jq -c --arg key "$key" 'del(.[$key])' <<<"$profile_document")"
+    fi
+  done < <(jq -r 'keys[]' <<<"$profile_document")
+  public_document="$(jq -cn --argjson profile "$profile_document" --argjson shell "$shell_document" \
+    '$profile + $shell')"
+
+  profile_file="$destination/dotfiles/custom/.home_weave_profile"
+  mkdir -p "$(dirname "$profile_file")" "$destination/metadata"
+  {
+    printf '%s\n' '# Canonical non-secret environment captured by HomeWeave snapshot.'
+    while IFS= read -r key; do
+      value="$(jq -r --arg key "$key" '.[$key]' <<<"$public_document")"
+      printf '%s=%s\n' "$key" "$value"
+    done < <(jq -r 'keys[]' <<<"$public_document")
+  } >"$profile_file"
+
+  secret_template="$destination/metadata/home_weave_secrets.example"
+  {
+    printf '%s\n' '# Variable names only. Restore values from an approved secret manager.'
+    printf '%s\n' '# Copy locally to ~/.home_weave_secrets and set mode 0600.'
+    jq -r 'sort[] | . + "="' <<<"$secret_keys"
+  } >"$secret_template"
+}
+
+snapshot_create() {
+  local destination="${POSITIONAL_ARGS[1]:-$HOME/home-weave-snapshot-$(date -u +%Y%m%dT%H%M%SZ)}"
+  local receipt='{}' profiles external='[]' timestamp
+  [[ -f "$ROOT/flake.nix" && -x "$ROOT/home-weave" ]] || fail "$ROOT is not a HomeWeave repository"
+  read_state
+  destination="$(portable_path "$destination")"
+  [[ ! -e "$destination" ]] || fail "snapshot destination already exists: $destination"
+  case "$destination" in "$ROOT"/*) fail "snapshot destination must be outside the HomeWeave root" ;; esac
+  require_commands jq rsync
+  scan_secrets "$ROOT"
+  mkdir -p "$destination"
+  rsync -a \
+    --exclude='.git/' --exclude='.state/' --exclude='backup/' --exclude='result' \
+    --exclude='.home_weave_secrets' "$ROOT/" "$destination/"
+  snapshot_environment "$destination"
+
+  if [[ -L "$ROOT/.state/receipts/latest" ]]; then
+    receipt="$(jq -c '.' "$(readlink -f "$ROOT/.state/receipts/latest")")"
+  fi
+  profiles="$(profile_metadata)"
+  external="$(nix profile list --json 2>/dev/null | jq -c '
+    to_entries | map({name: .key, storePaths: (.value.storePaths // []),
+      originalUrl: ((.value.originalUrl // null) as $url
+        | if ($url | type) == "string" and ($url | startswith("path:")) then null else $url end)})' \
+    2>/dev/null || printf '[]')"
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n \
+    --arg timestamp "$timestamp" --arg profile "$PROFILE" --arg shell "$PRIMARY_SHELL" \
+    --argjson receipt "$receipt" \
+    --argjson profiles "$profiles" --argjson external "$external" \
+    '{schemaVersion: 1, createdAt: $timestamp, activeProfile: ($receipt.activeProfile // $profile),
+      parentChain: ($receipt.parentChain // []), system: ($receipt.system // null),
+      shell: ($receipt.shell // $shell), nixpkgsRevision: ($receipt.nixpkgsRevision // null),
+      profiles: $profiles, packages: ($receipt.packages // []),
+      applications: ($receipt.applications // {homebrew: [], native: [], providers: []}),
+      observedExternalNixProfile: $external,
+      portability: {externalNixProfileIsInventoryOnly: true, secretValuesIncluded: false}}' \
+    >"$destination/snapshot.json"
+  mkdir -p "$destination/.state"
+  jq -r '.activeProfile' "$destination/snapshot.json" >"$destination/.state/selected-profile"
+  jq -r '.shell' "$destination/snapshot.json" >"$destination/.state/primary-shell"
+  find "$destination" -name .home_weave_secrets -print -quit | grep -q . \
+    && fail "internal error: snapshot contains a secrets file"
+  scan_secrets "$destination"
+  printf 'Portable HomeWeave snapshot created at %s\n' "$destination"
+  printf 'Secret values were not included. Required names: %s\n' \
+    "$destination/metadata/home_weave_secrets.example"
+  printf 'On another machine, run: home-weave snapshot restore %q --root ~/.home-weave-restored\n' "$destination"
+}
+
+snapshot_restore() {
+  local source="${POSITIONAL_ARGS[1]:-}"
+  [[ -n "$source" ]] || fail "snapshot restore requires a path"
+  source="$(portable_path "$source")"
+  [[ -d "$source" && -f "$source/snapshot.json" && -f "$source/flake.nix" ]] \
+    || fail "not a portable HomeWeave snapshot: $source"
+  jq -e '.schemaVersion == 1 and .portability.secretValuesIncluded == false' \
+    "$source/snapshot.json" >/dev/null || fail "unsupported or unsafe snapshot manifest"
+  find "$source" -name .home_weave_secrets -print -quit | grep -q . \
+    && fail "snapshot restore refuses a bundled .home_weave_secrets file"
+  [[ ! -e "$ROOT" ]] || {
+    [[ -d "$ROOT" && -z "$(find "$ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]] \
+      || fail "restore target must be absent or empty: $ROOT"
+  }
+  require_commands jq rsync
+  mkdir -p "$ROOT"
+  rsync -a --exclude='metadata/' --exclude='.home_weave_secrets' "$source/" "$ROOT/"
+  printf 'Snapshot restored as a HomeWeave repository at %s\n' "$ROOT"
+  printf 'Secret values were not restored. See %s\n' "$source/metadata/home_weave_secrets.example"
+  printf 'Review with: %s/home-weave plan\n' "$ROOT"
+  if [[ "$APPLY_NOW" == true ]]; then
+    HOME_WEAVE_ROOT="$ROOT" bash "$ROOT/home-weave" plan
+    confirm "Apply the restored snapshot?" || fail "snapshot restored but activation was cancelled"
+    HOME_WEAVE_ROOT="$ROOT" bash "$ROOT/home-weave" apply
+  fi
+}
+
+snapshot_command() {
+  local action="${POSITIONAL_ARGS[0]:-create}"
+  case "$action" in
+    create) snapshot_create ;;
+    restore) snapshot_restore ;;
+    *) fail "unknown snapshot command: $action (use create or restore)" ;;
+  esac
 }
 
 profile_command() {
@@ -2009,7 +2180,7 @@ parse_common_options "$@"
 normalize_root
 
 case "$COMMAND" in
-  setup|apply|update|uninstall) acquire_operation_lock ;;
+  setup|apply|update|uninstall|snapshot) acquire_operation_lock ;;
   profile)
     case "${POSITIONAL_ARGS[0]:-list}" in create|switch|delete) acquire_operation_lock ;; esac
     ;;
@@ -2025,6 +2196,7 @@ case "$COMMAND" in
   uninstall) uninstall_command ;;
   profile) profile_command ;;
   status) status_command ;;
+  snapshot) snapshot_command ;;
   provider) provider_command ;;
   extension) extension_command ;;
   help|--help|-h) usage ;;

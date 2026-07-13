@@ -29,7 +29,19 @@ let
       export HOME_WEAVE_PUBLISHER_FILTER="''${HOME_WEAVE_PUBLISHER_FILTER:-${../lib/verify-publishers.jq}}"
       export HOME_WEAVE_NATIVE_PROVIDER="''${HOME_WEAVE_NATIVE_PROVIDER:-${../lib/native-provider.sh}}"
       export HOME_WEAVE_PREFLIGHT_REPORTER="''${HOME_WEAVE_PREFLIGHT_REPORTER:-${../lib/preflight-report.sh}}"
+      export HOME_WEAVE_ENV_RENDERER="''${HOME_WEAVE_ENV_RENDERER:-${../lib/home-weave-env.sh}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
+    '';
+  };
+
+  homeWeaveEnv = prev.writeShellApplication {
+    name = "home-weave-env";
+    runtimeInputs = with final; [
+      coreutils
+      jq
+    ];
+    text = ''
+      exec ${final.bash}/bin/bash ${../lib/home-weave-env.sh} "$@"
     '';
   };
 
@@ -51,6 +63,7 @@ let
       curl
       git
       homeWeaveCli
+      homeWeaveEnv
       neovim
       starship
       stow
@@ -77,6 +90,7 @@ let
 in
 {
   home-weave-cli = homeWeaveCli;
+  home-weave-env = homeWeaveEnv;
   inherit
     commonTerminalPackages
     commonToolPackages
