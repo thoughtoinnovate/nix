@@ -320,10 +320,12 @@ unless the profile is updated.
 
 Do not add `.state` to Git. Generated flakes, plans, receipts, and operation
 state are intentionally ignored. This message means the repository launcher is
-using an older HomeWeave release that passed the generated directory to Nix as
-a Git-filtered flake. Refresh setup from the current distribution, then run
-`plan` again. Declining the optional initial Git commit is supported and is not
-the cause of this error.
+using an older HomeWeave release that passed a local directory to Nix as a
+Git-filtered flake. It can affect `plan`, `apply`, `update`, or older
+`uninstall`/`nuke` paths. Refresh setup from the current distribution, then
+retry the operation.
+Declining the optional initial Git commit is supported and is not the cause of
+this error.
 
 ### An unfree package is refused
 

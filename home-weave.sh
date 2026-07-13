@@ -1762,7 +1762,7 @@ uninstall_home_manager() {
   "$DRY_RUN" && return 0
   [[ -f "$generated/flake.nix" ]] || fail "generated Home Manager configuration is missing"
   printf 'y\n' | nix --extra-experimental-features 'nix-command flakes' \
-    run "$generated#home-manager" -- uninstall
+    run "path:$generated#home-manager" -- uninstall
   rm -f "$ROOT/.state/applied" "$ROOT/.state/home-manager-pending"
   printf 'Home Manager environment removed. Nix itself was not removed.\n'
 }
@@ -2119,7 +2119,7 @@ sync_command() {
 update_command() {
   require_commands nix
   [[ -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
-  nix --extra-experimental-features 'nix-command flakes' flake update --flake "$ROOT"
+  nix --extra-experimental-features 'nix-command flakes' flake update --flake "path:$ROOT"
   printf 'Inputs updated. Review %s/flake.lock, then run home-weave plan.\n' "$ROOT"
 }
 

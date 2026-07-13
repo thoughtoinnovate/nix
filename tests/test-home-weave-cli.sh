@@ -10,6 +10,8 @@ TEST_HOME="$TEST_ROOT/home"
 mkdir -p "$TEST_HOME"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
+grep -Fq 'flake update --flake "path:$ROOT"' "$TEMPLATE/setup.sh"
+
 run_cli() {
   HOME="$TEST_HOME" \
     HOME_WEAVE_PROFILE_TEMPLATE="$TEMPLATE" \
@@ -190,6 +192,18 @@ grep -Fq 'apply apply --action install managed' "$provider_log"
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension list | grep -Fxq fake
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension fake status | grep -Fq 'command command status'
 
+# Git is optional. Update must address the HomeWeave root as an explicit path
+# flake so untracked or ignored files are not filtered by Nix's Git fetcher.
+mkdir -p "$TEST_ROOT/update-bin"
+cat >"$TEST_ROOT/update-bin/nix" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$UPDATE_NIX_LOG"
+EOF
+chmod +x "$TEST_ROOT/update-bin/nix"
+export UPDATE_NIX_LOG="$TEST_ROOT/update-nix.log"
+PATH="$TEST_ROOT/update-bin:$PATH" run_cli update >/dev/null
+grep -Fq "flake update --flake path:$ROOT" "$UPDATE_NIX_LOG"
+
 # Uninstall removes only the active Stow generation, restores missing adopted
 # files, keeps the repository, and skips Home Manager without an apply marker.
 mkdir -p "$ROOT/.state/dotfiles/current" "$ROOT/backup/restore-test/home"
@@ -214,6 +228,23 @@ touch "$ROOT/.state/home-manager-pending"
 pending_uninstall_output="$(run_cli uninstall --all --dry-run --yes)"
 grep -Fq 'Home Manager will remove its managed packages' <<<"$pending_uninstall_output"
 rm -f "$ROOT/.state/home-manager-pending"
+
+# Generated runtime state is intentionally ignored by Git. Uninstall must use
+# an explicit path flake so it remains visible when the HomeWeave root is a Git
+# repository.
+mkdir -p "$ROOT/.state/generated" "$TEST_ROOT/uninstall-bin"
+printf '{ outputs = _: { }; }\n' >"$ROOT/.state/generated/flake.nix"
+touch "$ROOT/.state/home-manager-pending"
+cat >"$TEST_ROOT/uninstall-bin/nix" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$UNINSTALL_NIX_LOG"
+EOF
+chmod +x "$TEST_ROOT/uninstall-bin/nix"
+export UNINSTALL_NIX_LOG="$TEST_ROOT/uninstall-nix.log"
+PATH="$TEST_ROOT/uninstall-bin:$PATH" run_cli uninstall --all --yes >/dev/null
+grep -Fq "run path:$ROOT/.state/generated#home-manager -- uninstall" "$UNINSTALL_NIX_LOG"
+test ! -e "$ROOT/.state/home-manager-pending"
+
 run_cli uninstall --all --dry-run --yes | grep -Fq 'Repository retained'
 run_cli uninstall --nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
 run_cli uninstall nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
