@@ -4,6 +4,43 @@ HomeWeave installs a reproducible terminal environment with Nix and manages
 dotfiles with Stow. It does not replace Nix, change your login shell, or remove
 unrelated applications.
 
+## 0. Install Nix
+
+If this command already succeeds, keep the existing installation and continue
+to step 1:
+
+```sh
+nix --version
+```
+
+Use only the official Nix installer. On macOS, run:
+
+```sh
+curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install | sh
+```
+
+On Linux with systemd, the official recommended multi-user installation is:
+
+```sh
+curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install \
+  | sh -s -- --daemon
+```
+
+The installer explains its privileged operations before requesting `sudo`.
+When it finishes, close Terminal completely, open a new terminal, and verify:
+
+```sh
+nix --version
+nix --extra-experimental-features 'nix-command flakes' \
+  eval --expr '1 + 1'
+```
+
+The second command should print `2`. HomeWeave commands enable `nix-command`
+and flakes for each invocation, so changing global Nix configuration is not a
+prerequisite. Official installation details and current platform notes are at
+[nixos.org/download](https://nixos.org/download/) and
+[nix.dev/install-nix](https://nix.dev/install-nix.html).
+
 ## 1. Create your HomeWeave repository
 
 Run the setup application:
@@ -278,6 +315,15 @@ environment. Continue later with:
 This is normal on the first plan for a generated local Home Manager consumer.
 Review the pinned revisions shown in the output. Later plans reuse that lock
 unless the profile is updated.
+
+### Plan says `.state/generated/flake.nix` is not tracked by Git
+
+Do not add `.state` to Git. Generated flakes, plans, receipts, and operation
+state are intentionally ignored. This message means the repository launcher is
+using an older HomeWeave release that passed the generated directory to Nix as
+a Git-filtered flake. Refresh setup from the current distribution, then run
+`plan` again. Declining the optional initial Git commit is supported and is not
+the cause of this error.
 
 ### An unfree package is refused
 

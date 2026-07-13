@@ -7,6 +7,7 @@ SELECTED_SHELL=""
 BASE_URL="${NIX_BASE_URL:-github:thoughtoinnovate/nix}"
 CONFIG_URL="${NIX_CONFIG_URL:-}"
 CONFIG_DIR="${NIX_CONFIG_DIR:-}"
+CONFIG_FLAKE=""
 NAMESPACE="${HOME_WEAVE_NAMESPACE:-}"
 ASSUME_YES=false
 ALLOW_NIX_INSTALL=true
@@ -54,7 +55,7 @@ cleanup() {
       fi
     else
       printf 'warning: removing the first Home Manager generation after activation failure\n' >&2
-      if printf 'y\n' | nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- uninstall >/dev/null 2>&1; then
+      if printf 'y\n' | nix "${NIX_FLAGS[@]}" run "$CONFIG_FLAKE#home-manager" -- uninstall >/dev/null 2>&1; then
         rollback_succeeded=true
       else
         printf 'warning: automatic removal of the failed first generation did not complete\n' >&2
@@ -364,6 +365,7 @@ fi
 NAMESPACE="${NAMESPACE:-home-weave}"
 validate_namespace
 CONFIG_DIR="${CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/$NAMESPACE/generated}"
+CONFIG_FLAKE="path:$CONFIG_DIR"
 
 if [[ -z "$SELECTED_SHELL" ]]; then
   [[ -t 0 ]] || fail "use --shell when running non-interactively"
@@ -509,7 +511,7 @@ EOF
 
 mv "$TEMP_FLAKE" "$TARGET_FLAKE"
 
-nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_DIR"
+nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_FLAKE"
 
 preflight_activation() {
   local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 unfree_name=""
@@ -518,7 +520,7 @@ preflight_activation() {
   data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
   mkdir -p "$data_root"
   if ! nix "${NIX_FLAGS[@]}" build --dry-run --no-link \
-    "$CONFIG_DIR#homeConfigurations.\"$USER\".activationPackage" >"$output_file" 2>&1; then
+    "$CONFIG_FLAKE#homeConfigurations.\"$USER\".activationPackage" >"$output_file" 2>&1; then
     cat "$output_file" >&2
     if grep -Eqi 'unfree|license' "$output_file"; then
       unfree_name="$(sed -nE "s/.*Refusing to evaluate package '([^']+)'.*/\1/p" "$output_file" | head -n 1)"
@@ -580,8 +582,8 @@ if "$GENERATE_ONLY"; then
 fi
 
 PREVIOUS_HOME_GENERATION="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)"
-nix "${NIX_FLAGS[@]}" run "$CONFIG_DIR#home-manager" -- \
-  switch --flake "$CONFIG_DIR#$USER"
+nix "${NIX_FLAGS[@]}" run "$CONFIG_FLAKE#home-manager" -- \
+  switch --flake "$CONFIG_FLAKE#$USER"
 HOME_MANAGER_SWITCHED=true
 mkdir -p "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
 printf '%s\n' "$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)" \
