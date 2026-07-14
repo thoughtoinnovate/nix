@@ -52,6 +52,7 @@ OPERATION_LOG=""
 OPERATION_PHASE=""
 OPERATION_STARTED_AT=""
 OPERATION_FINISHED=false
+UNINSTALLED_DOTFILE_GENERATION=""
 
 fail() {
   if [[ -n "$OPERATION_LOG" && "$OPERATION_FINISHED" == false ]]; then
@@ -1875,6 +1876,7 @@ uninstall_dotfiles() {
     || fail "could not unlink the active HomeWeave dotfiles"
   mkdir -p "$(dirname "$backup")"
   mv "$current" "$backup"
+  UNINSTALLED_DOTFILE_GENERATION="$backup"
   printf 'Unlinked HomeWeave dotfiles; generation saved at %s.\n' "$backup"
 }
 
@@ -1932,17 +1934,46 @@ is_stale_dotfile_link_owned_by_root() {
 }
 
 collect_stale_dotfile_links() {
-  local link
-  while IFS= read -r -d '' link; do
-    is_stale_dotfile_link_owned_by_root "$link" || continue
-    printf '%s\0' "$link"
-  done < <(find "$HOME" -type l -print0 2>/dev/null)
+  local generation staged relative link receipt destination
+
+  # Inspect only destinations HomeWeave can prove it managed. Walking the
+  # entire home is both unnecessary and extremely slow on macOS homes with
+  # cloud storage, application sandboxes, or protected directories.
+  for generation in \
+    "$ROOT/.state/dotfiles/current" \
+    "$UNINSTALLED_DOTFILE_GENERATION"; do
+    [[ -n "$generation" && -d "$generation" ]] || continue
+    while IFS= read -r -d '' staged; do
+      relative="${staged#"$generation"/}"
+      link="$HOME/$relative"
+      is_stale_dotfile_link_owned_by_root "$link" || continue
+      printf '%s\0' "$link"
+    done < <(find "$generation" \( -type f -o -type l \) -print0)
+  done
+
+  if [[ -d "$ROOT/.state/receipts" ]]; then
+    while IFS= read -r receipt; do
+      while IFS= read -r destination; do
+        [[ "$destination" == "$HOME/"* ]] || continue
+        is_stale_dotfile_link_owned_by_root "$destination" || continue
+        printf '%s\0' "$destination"
+      done < <(jq -r '.dotfiles[]?.destination // empty' "$receipt" 2>/dev/null || true)
+    done < <(find "$ROOT/.state/receipts" -maxdepth 1 -type f -name '*.json' -print)
+  fi
 }
 
 cleanup_stale_dotfile_links() {
-  local link
+  local link existing duplicate
   local stale_links=()
   while IFS= read -r -d '' link; do
+    duplicate=false
+    for existing in "${stale_links[@]-}"; do
+      if [[ "$existing" == "$link" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    "$duplicate" && continue
     stale_links+=("$link")
   done < <(collect_stale_dotfile_links)
 

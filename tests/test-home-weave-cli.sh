@@ -11,6 +11,10 @@ mkdir -p "$TEST_HOME"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
 grep -Fq 'flake update --flake "path:$ROOT"' "$TEMPLATE/setup.sh"
+if grep -Fq 'find "$HOME" -type l' "$CLI"; then
+  printf 'uninstall must not traverse the entire home to find stale links\n' >&2
+  exit 1
+fi
 
 run_cli() {
   HOME="$TEST_HOME" \
@@ -244,6 +248,13 @@ ln -s "$ROOT/.state/dotfiles/current/.config/stale-absolute" \
 ln -s "../.home-weave/.state/dotfiles/current/.config/stale-relative" \
   "$TEST_HOME/.config/stale-relative"
 ln -s "/missing/not-homeweave" "$TEST_HOME/.config/unrelated-broken"
+jq --arg absolute "$TEST_HOME/.config/stale-absolute" \
+  --arg relative "$TEST_HOME/.config/stale-relative" \
+  '.dotfiles = [
+    {destination: $absolute, source: "fixture", layer: "fixture"},
+    {destination: $relative, source: "fixture", layer: "fixture"}
+  ]' "$ROOT/.state/receipts/fixture.json" >"$ROOT/.state/receipts/fixture.json.tmp"
+mv "$ROOT/.state/receipts/fixture.json.tmp" "$ROOT/.state/receipts/fixture.json"
 
 run_cli uninstall --profile development --dry-run | grep -Fq 'inactive'
 touch "$ROOT/.state/home-manager-pending"
