@@ -273,11 +273,29 @@ Start with read-only diagnostics:
 ```sh
 ~/.home-weave/home-weave status
 ~/.home-weave/home-weave status --json
+~/.home-weave/home-weave logs
+~/.home-weave/home-weave logs --latest --tail 100
 ~/.home-weave/home-weave profile show development
 nix profile list
 ```
 
 Use your selected `--root` instead of `~/.home-weave` when applicable.
+Operation logs are private local state under `.state/logs`, retain the latest
+20 runs, and identify whether a failure occurred during providers, Nix
+preflight, Home Manager, dotfile composition, Stow, or receipt creation.
+
+### Apply reports an activation failure
+
+Inspect the recorded phase and the end of the latest log before retrying:
+
+```sh
+~/.home-weave/home-weave status
+~/.home-weave/home-weave logs --latest --tail 100
+```
+
+HomeWeave automatically reclaims dangling links only when their normalized
+target exactly matches the file HomeWeave is about to manage. Unrelated or
+mismatched links remain protected conflicts and are reported in the log.
 
 ### `nix-command` or flakes are disabled
 

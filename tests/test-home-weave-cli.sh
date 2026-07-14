@@ -160,6 +160,18 @@ test "$(<"$ROOT/.state/active-profile")" = base
 test "$(<"$ROOT/.state/dotfiles/current/failure-marker")" = unchanged
 test "$(readlink "$ROOT/.state/receipts/latest")" = fixture.json
 test ! -e "$ROOT/.state/applied"
+jq -e '.command == "apply" and .status == "failed" and .phase == "activation"' \
+  "$ROOT/.state/last-operation.json" >/dev/null || {
+    cat "$ROOT/.state/last-operation.json" >&2
+    cat "$(readlink -f "$ROOT/.state/logs/latest")" >&2
+    exit 1
+  }
+latest_log="$(readlink -f "$ROOT/.state/logs/latest")"
+test -n "$(find "$latest_log" -prune -perm 600 -print)"
+run_cli logs | grep -Fq '.log'
+latest_log_output="$(run_cli logs --latest --tail 20)"
+grep -Fq 'activation failed; adopted configurations were restored' <<<"$latest_log_output"
+run_cli status --json | jq -e '.lastOperation.status == "failed" and .lastOperation.logPath != null' >/dev/null
 cp "$TEST_ROOT/setup.sh.saved" "$ROOT/setup.sh"
 
 provider="$TEST_ROOT/fake-provider"
@@ -245,10 +257,14 @@ PATH="$TEST_ROOT/uninstall-bin:$PATH" run_cli uninstall --all --yes >/dev/null
 grep -Fq "run path:$ROOT/.state/generated#home-manager -- uninstall" "$UNINSTALL_NIX_LOG"
 test ! -e "$ROOT/.state/home-manager-pending"
 
-run_cli uninstall --all --dry-run --yes | grep -Fq 'Repository retained'
-run_cli uninstall --nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
-run_cli uninstall nuke --dry-run --yes | grep -Fq 'Would delete HomeWeave-owned root'
-run_cli uninstall all --dry-run --yes | grep -Fq 'Repository retained'
+dry_run_output="$(run_cli uninstall --all --dry-run --yes)"
+grep -Fq 'Repository retained' <<<"$dry_run_output"
+dry_run_output="$(run_cli uninstall --nuke --dry-run --yes)"
+grep -Fq 'Would delete HomeWeave-owned root' <<<"$dry_run_output"
+dry_run_output="$(run_cli uninstall nuke --dry-run --yes)"
+grep -Fq 'Would delete HomeWeave-owned root' <<<"$dry_run_output"
+dry_run_output="$(run_cli uninstall all --dry-run --yes)"
+grep -Fq 'Repository retained' <<<"$dry_run_output"
 printf 'must-remain\n' >"$ROOT/.state/active-profile"
 if run_cli uninstall nuke --yes 2>"$TEST_ROOT/nuke-confirmation-error"; then
   printf 'expected non-interactive nuke to fail before making changes\n' >&2

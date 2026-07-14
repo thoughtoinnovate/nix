@@ -40,20 +40,102 @@ UNINSTALL_KEEP_HOME_MANAGER=false
 UNINSTALL_NO_RESTORE=false
 DRY_RUN=false
 STATUS_JSON=false
+LOG_LATEST=false
+LOG_TAIL=100
 UNINSTALL_ALL=false
 UNINSTALL_NUKE=false
 TIMESTAMP=""
 OLD_ROOT=""
 ADOPTION_BACKUP_ROOT=""
 ROOT_REPLACEMENT_STARTED=false
+OPERATION_LOG=""
+OPERATION_PHASE=""
+OPERATION_STARTED_AT=""
+OPERATION_FINISHED=false
 
 fail() {
-  printf 'error: %s\n' "$*" >&2
+  if [[ -n "$OPERATION_LOG" && "$OPERATION_FINISHED" == false ]]; then
+    finish_operation_log failed
+  fi
+  if [[ -n "$OPERATION_LOG" ]]; then
+    printf 'error: %s\n' "$*" | tee -a "$OPERATION_LOG" >&2
+  else
+    printf 'error: %s\n' "$*" >&2
+  fi
+  if [[ -n "$OPERATION_LOG" ]]; then
+    {
+      printf 'Operation phase: %s\n' "${OPERATION_PHASE:-unknown}"
+      printf 'Operation log: %s\n' "$OPERATION_LOG"
+    } | tee -a "$OPERATION_LOG" >&2
+  fi
   exit 1
 }
 
 warn() {
   printf 'warning: %s\n' "$*" >&2
+}
+
+write_operation_metadata() {
+  local status="$1" finished_at="${2:-}" metadata="$ROOT/.state/last-operation.json"
+  [[ -n "$OPERATION_LOG" ]] || return 0
+  jq -n \
+    --arg command "$COMMAND" --arg phase "${OPERATION_PHASE:-starting}" \
+    --arg status "$status" --arg startedAt "$OPERATION_STARTED_AT" \
+    --arg finishedAt "$finished_at" --arg logPath "$OPERATION_LOG" \
+    '{schemaVersion: 1, command: $command, phase: $phase, status: $status,
+      startedAt: $startedAt, finishedAt: (if $finishedAt == "" then null else $finishedAt end),
+      logPath: $logPath}' >"$metadata.tmp.$$" || return 0
+  mv "$metadata.tmp.$$" "$metadata"
+}
+
+start_operation_log() {
+  local label="${1:-$COMMAND}" logs timestamp old
+  [[ -z "$OPERATION_LOG" ]] || return 0
+  [[ -d "$ROOT" ]] || return 0
+  logs="$ROOT/.state/logs"
+  mkdir -p "$logs"
+  chmod 700 "$logs" 2>/dev/null || true
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  OPERATION_LOG="$logs/$timestamp-$label-$$.log"
+  OPERATION_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  OPERATION_PHASE=starting
+  : >"$OPERATION_LOG"
+  chmod 600 "$OPERATION_LOG"
+  ln -sfn "$(basename "$OPERATION_LOG")" "$logs/latest"
+  while IFS= read -r old; do
+    rm -f "$old"
+  done < <(find "$logs" -maxdepth 1 -type f -name '*.log' -print | sort -r | tail -n +21)
+  write_operation_metadata running
+  printf 'Operation log: %s\n' "$OPERATION_LOG" | tee -a "$OPERATION_LOG"
+}
+
+set_operation_phase() {
+  OPERATION_PHASE="$1"
+  [[ -z "$OPERATION_LOG" ]] || write_operation_metadata running
+  if [[ -n "$OPERATION_LOG" ]]; then
+    printf 'HomeWeave phase: %s\n' "$OPERATION_PHASE" | tee -a "$OPERATION_LOG"
+  else
+    printf 'HomeWeave phase: %s\n' "$OPERATION_PHASE"
+  fi
+}
+
+run_logged() {
+  if [[ -z "$OPERATION_LOG" ]]; then
+    "$@"
+    return
+  fi
+  set +e
+  "$@" 2>&1 | tee -a "$OPERATION_LOG"
+  local status="${PIPESTATUS[0]}"
+  set -e
+  return "$status"
+}
+
+finish_operation_log() {
+  local status="$1"
+  [[ -n "$OPERATION_LOG" && "$OPERATION_FINISHED" == false ]] || return 0
+  write_operation_metadata "$status" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  OPERATION_FINISHED=true
 }
 
 usage() {
@@ -67,6 +149,7 @@ Usage:
   home-weave update [--root PATH]
   home-weave profile list|show|create|diff|switch|delete ...
   home-weave status [--profile NAME] [--json]
+  home-weave logs [--latest] [--tail N]
   home-weave snapshot create [PATH] [--root PATH]
   home-weave snapshot restore PATH [--root PATH] [--apply]
   home-weave restore [GIT_URL] [--merge|--override] [--root PATH]
@@ -203,6 +286,13 @@ parse_common_options() {
       --no-restore) UNINSTALL_NO_RESTORE=true; shift ;;
       --dry-run) DRY_RUN=true; shift ;;
       --json) STATUS_JSON=true; shift ;;
+      --latest) LOG_LATEST=true; shift ;;
+      --tail)
+        [[ $# -ge 2 ]] || fail "--tail requires a positive integer"
+        [[ "$2" =~ ^[1-9][0-9]*$ ]] || fail "--tail requires a positive integer"
+        LOG_TAIL="$2"
+        shift 2
+        ;;
       --all) UNINSTALL_ALL=true; shift ;;
       --nuke) UNINSTALL_NUKE=true; UNINSTALL_ALL=true; shift ;;
       --yes|-y) ASSUME_YES=true; shift ;;
@@ -1303,7 +1393,7 @@ profile_metadata() {
 
 record_receipt() {
   local receipts="$ROOT/.state/receipts" timestamp receipt temporary previous profiles system revision
-  local inventory='[]' preflight='{}' dotfiles='[]' casks='[]' providers='[]' provider_status='{}' parent_chain='[]' cursor parent
+  local inventory='[]' preflight='{}' dotfiles='[]' casks='[]' providers='[]' provider_status='{}' provider_status_file parent_chain='[]' cursor parent
   local current_generation previous_generation changes
   timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   receipt="$receipts/${timestamp//:/-}.json"
@@ -1330,8 +1420,10 @@ record_receipt() {
     casks="$(jq -Rsc 'split("\n") | map(select(length > 0) | {id: ., provider: "homebrew", repositoryTrust: "official Homebrew repository"})' \
       <"$ROOT/.state/installed-casks")"
   fi
-  if [[ -s "$ROOT/.state/provider-status.json" ]]; then
-    provider_status="$(<"$ROOT/.state/provider-status.json")"
+  provider_status_file="$ROOT/.state/provider-status.json"
+  [[ ! -s "$ROOT/.state/provider-status.pending.json" ]] || provider_status_file="$ROOT/.state/provider-status.pending.json"
+  if [[ -s "$provider_status_file" ]]; then
+    provider_status="$(<"$provider_status_file")"
     jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$provider_status" \
       || fail "invalid provider status state"
     providers="$(jq -c '.items' <<<"$provider_status")"
@@ -1396,7 +1488,11 @@ record_receipt() {
 }
 
 status_command() {
-  local receipt="" candidate
+  local receipt="" candidate last_operation='null'
+  if [[ -s "$ROOT/.state/last-operation.json" ]] \
+    && jq -e '.schemaVersion == 1' "$ROOT/.state/last-operation.json" >/dev/null 2>&1; then
+    last_operation="$(jq -c . "$ROOT/.state/last-operation.json")"
+  fi
   if [[ -n "$PROFILE" ]]; then
     validate_name "$PROFILE"
     while IFS= read -r candidate; do
@@ -1407,13 +1503,22 @@ status_command() {
   fi
   if [[ -z "$receipt" || ! -r "$receipt" ]]; then
     if "$STATUS_JSON"; then
-      jq -n --arg profile "${PROFILE:-}" '{installed: false, activeProfile: (if $profile == "" then null else $profile end)}'
+      jq -n --arg profile "${PROFILE:-}" --argjson lastOperation "$last_operation" \
+        '{installed: false, activeProfile: (if $profile == "" then null else $profile end),
+          lastOperation: $lastOperation}'
     else
       printf 'HomeWeave has no successful activation receipt%s.\n' "${PROFILE:+ for profile $PROFILE}"
+      if [[ "$last_operation" != null ]]; then
+        jq -r '"Last operation: \(.command) \(.status) during \(.phase)\nOperation log:  \(.logPath)"' \
+          <<<"$last_operation"
+      fi
     fi
     return
   fi
-  if "$STATUS_JSON"; then cat "$receipt"; return; fi
+  if "$STATUS_JSON"; then
+    jq --argjson lastOperation "$last_operation" '. + {lastOperation: $lastOperation}' "$receipt"
+    return
+  fi
   jq -r '
     "HomeWeave status",
     "  Active profile: \(.activeProfile)",
@@ -1428,6 +1533,31 @@ status_command() {
     "  Managed files:  \(.dotfiles | length)",
     "  Changes:        +\(.changes.added | length) -\(.changes.removed | length) ~\(.changes.changed | length) =\(.changes.retained | length)",
     "  Rollback:       \(.rollback.previousHomeManagerGeneration // "none")"' "$receipt"
+  if [[ "$last_operation" != null ]]; then
+    jq -r '"  Last operation: \(.command) \(.status) during \(.phase)\n  Operation log:  \(.logPath)"' \
+      <<<"$last_operation"
+  fi
+}
+
+logs_command() {
+  local logs="$ROOT/.state/logs" latest file
+  [[ -d "$logs" ]] || {
+    printf 'HomeWeave has no operation logs.\n'
+    return
+  }
+  if "$LOG_LATEST"; then
+    if [[ -L "$logs/latest" ]]; then
+      latest="$(readlink -f "$logs/latest" 2>/dev/null || true)"
+    else
+      latest="$(find "$logs" -maxdepth 1 -type f -name '*.log' -print | sort -r | head -n 1)"
+    fi
+    [[ -n "$latest" && -r "$latest" ]] || fail "latest operation log is unavailable"
+    tail -n "$LOG_TAIL" "$latest"
+    return
+  fi
+  while IFS= read -r file; do
+    printf '%s\n' "$file"
+  done < <(find "$logs" -maxdepth 1 -type f -name '*.log' -print | sort -r)
 }
 
 is_sensitive_environment_name() {
@@ -1682,6 +1812,8 @@ profile_command() {
 
 run_profile_setup() {
   local mode="$1" profiles selected_shell setup_args=()
+  start_operation_log "$mode"
+  set_operation_phase profile-evaluation
   read_state
   [[ -f "$ROOT/setup.sh" ]] || fail "$ROOT is not a HomeWeave profile"
   profiles="$(nix --extra-experimental-features 'nix-command flakes' \
@@ -1690,28 +1822,40 @@ run_profile_setup() {
   [[ -z "$selected_shell" ]] || PRIMARY_SHELL="$selected_shell"
   "$ASSUME_YES" && setup_args+=(--yes)
   if [[ "$mode" == plan ]]; then
-    HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only "${setup_args[@]}"
-    reconcile_profile_providers plan "$profiles"
+    set_operation_phase nix-preflight
+    if ! HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
+      run_logged bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" --generate-only "${setup_args[@]}"; then
+      [[ ! -r "$ROOT/.state/operation-phase" ]] || OPERATION_PHASE="$(<"$ROOT/.state/operation-phase")"
+      fail "plan failed"
+    fi
+    set_operation_phase provider-plan
+    reconcile_profile_providers plan "$profiles" || fail "provider planning failed"
+    finish_operation_log success
   else
-    reconcile_profile_providers apply "$profiles"
+    set_operation_phase provider-reconciliation
+    reconcile_profile_providers apply "$profiles" || fail "provider reconciliation failed"
+    set_operation_phase adoption-staging
     if ! prepare_adoptions; then
       restore_adoptions
       fail "could not stage adopted configurations"
     fi
+    set_operation_phase activation
     if HOME_WEAVE_DATA_ROOT="$ROOT/.state" NIX_CONFIG_DIR="$ROOT/.state/generated" \
-      bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" "${setup_args[@]}"; then
+      run_logged bash "$ROOT/setup.sh" --profile "$PROFILE" --shell "$PRIMARY_SHELL" "${setup_args[@]}"; then
+      set_operation_phase receipt
+      record_receipt || fail "activation succeeded but receipt creation failed"
       : >"$ROOT/.state/adoptions"
       if [[ -f "$ROOT/.state/provider-status.pending.json" ]]; then
         mv "$ROOT/.state/provider-status.pending.json" "$ROOT/.state/provider-status.json"
       fi
       date -u +%Y%m%dT%H%M%SZ >"$ROOT/.state/applied"
       write_state
-      record_receipt
       rm -f "$ROOT/.state/home-manager-pending"
       printf 'Active HomeWeave profile: %s\n' "$PROFILE"
       ADOPTION_BACKUP_ROOT=""
+      finish_operation_log success
     else
+      [[ ! -r "$ROOT/.state/operation-phase" ]] || OPERATION_PHASE="$(<"$ROOT/.state/operation-phase")"
       restore_adoptions
       fail "activation failed; adopted configurations were restored"
     fi
@@ -2119,8 +2263,12 @@ sync_command() {
 update_command() {
   require_commands nix
   [[ -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
-  nix --extra-experimental-features 'nix-command flakes' flake update --flake "path:$ROOT"
+  start_operation_log update
+  set_operation_phase nix-update
+  run_logged nix --extra-experimental-features 'nix-command flakes' flake update --flake "path:$ROOT" \
+    || fail "Nix input update failed"
   printf 'Inputs updated. Review %s/flake.lock, then run home-weave plan.\n' "$ROOT"
+  finish_operation_log success
 }
 
 provider_command() {
@@ -2196,6 +2344,7 @@ case "$COMMAND" in
   uninstall) uninstall_command ;;
   profile) profile_command ;;
   status) status_command ;;
+  logs) logs_command ;;
   snapshot) snapshot_command ;;
   provider) provider_command ;;
   extension) extension_command ;;

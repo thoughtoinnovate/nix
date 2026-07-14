@@ -573,15 +573,19 @@ preflight_activation() {
   rm -f "$output_file"
 }
 
+mkdir -p "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
+printf '%s\n' nix-preflight >"${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
 preflight_activation
 
 if "$GENERATE_ONLY"; then
+  rm -f "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
   printf 'Generated %s for %s/%s (%s).\n' \
     "$CONFIG_DIR" "$PROFILE" "$SELECTED_SHELL" "$SYSTEM"
   exit 0
 fi
 
 PREVIOUS_HOME_GENERATION="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)"
+printf '%s\n' home-manager >"${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
 nix "${NIX_FLAGS[@]}" run "$CONFIG_FLAKE#home-manager" -- \
   switch --flake "$CONFIG_FLAKE#$USER"
 HOME_MANAGER_SWITCHED=true
@@ -646,14 +650,17 @@ DOTFILE_SNAPSHOT_ROOT="$(mktemp -d)"
 if [[ -d "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles/current" ]]; then
   cp -R "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/dotfiles/current" "$DOTFILE_SNAPSHOT_ROOT/current"
 fi
+printf '%s\n' applications >"${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
+install_macos_apps
+printf '%s\n' dotfiles >"${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
 if [[ -n "$CONFIG_URL" ]]; then
   compose_profile_components
 else
   compose_bundled_dotfiles
 fi
 DOTFILES_CHANGED=true
-install_macos_apps
 ACTIVATION_COMMITTED=true
+rm -f "${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}/operation-phase"
 
 case "$SELECTED_SHELL" in
   nushell) SHELL_PROGRAM="nu" ;;

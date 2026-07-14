@@ -148,6 +148,29 @@ run_composer zsh
 [[ ! -e "$TEST_HOME/.config/shell/conf.d/profile.sh" ]]
 [[ -e "$TEST_HOME/.config/nvim/lazy-lock.json" ]]
 
+# A root that was deleted and recreated can reclaim only exact HomeWeave-owned
+# dangling links. This covers both standalone and nested managed files.
+STALE_HOME="$TEST_ROOT/stale-home"
+STALE_DATA="$TEST_ROOT/stale-data"
+STALE_CURRENT="$STALE_DATA/home-weave/dotfiles/current"
+mkdir -p "$STALE_HOME/.config/nvim" "$STALE_HOME/.config"
+ln -s "$STALE_CURRENT/.config/starship.toml" "$STALE_HOME/.config/starship.toml"
+ln -s "$STALE_CURRENT/.config/nvim/init.lua" "$STALE_HOME/.config/nvim/init.lua"
+write_public_json
+HOME="$STALE_HOME" XDG_DATA_HOME="$STALE_DATA" \
+  bash "$COMPOSER" --shell zsh --namespace home-weave --json "$JSON_FILE"
+[[ -e "$STALE_HOME/.config/starship.toml" ]]
+[[ -e "$STALE_HOME/.config/nvim/init.lua" ]]
+
+# A dangling link into the managed tree but for the wrong relative destination
+# is not claimed as HomeWeave-owned.
+rm -rf "$STALE_CURRENT"
+rm "$STALE_HOME/.config/starship.toml"
+ln -s "$STALE_CURRENT/.config/not-starship.toml" "$STALE_HOME/.config/starship.toml"
+expect_failure "destination conflict" env HOME="$STALE_HOME" XDG_DATA_HOME="$STALE_DATA" \
+  bash "$COMPOSER" --shell zsh --namespace home-weave --json "$JSON_FILE"
+[[ "$(readlink "$STALE_HOME/.config/starship.toml")" == "$STALE_CURRENT/.config/not-starship.toml" ]]
+
 # Invalid paths, root replacement, absent sources, hashes, and type conflicts fail early.
 cp "$JSON_FILE" "$TEST_ROOT/valid.json"
 for path in ../escape a/../escape /absolute ./relative a//b; do

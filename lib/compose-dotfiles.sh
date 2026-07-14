@@ -92,9 +92,11 @@ current_dir="$stow_root/current"
 temp_dir="$stow_root/.current.new.$$"
 backup_dir="$stow_root/.current.previous.$$"
 transaction_started=false
+stale_links_file="$stow_root/.stale-links.$$"
 
 cleanup() {
   rm -rf "$temp_dir"
+  rm -f "$stale_links_file"
   if [[ -d "$backup_dir" && "$transaction_started" == false ]]; then
     rm -rf "$backup_dir"
   fi
@@ -102,6 +104,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$temp_dir" "$sources_root"
+: >"$stale_links_file"
 
 validate_relative_path() {
   local path="$1" label="$2"
@@ -265,12 +268,72 @@ while IFS= read -r layer; do
   fi
 done < <(jq -c '.layers[]' <<<"$dotfiles_json")
 
+normalize_absolute_path() {
+  local path="$1" segment normalized=""
+  local parts=()
+  [[ "$path" == /* ]] || return 1
+  while IFS= read -r segment; do
+    case "$segment" in
+      ""|.) ;;
+      ..)
+        ((${#parts[@]} > 0)) || return 1
+        parts=("${parts[@]:0:${#parts[@]}-1}")
+        ;;
+      *) parts+=("$segment") ;;
+    esac
+  done < <(tr '/' '\n' <<<"$path")
+  for segment in "${parts[@]}"; do
+    normalized="$normalized/$segment"
+  done
+  printf '%s\n' "${normalized:-/}"
+}
+
 is_current_link() {
-  local destination="$1" resolved current_resolved
-  [[ -L "$destination" && -d "$current_dir" ]] || return 1
-  resolved="$(realpath "$destination")" || return 1
-  current_resolved="$(realpath "$current_dir")" || return 1
-  [[ "$resolved" == "$current_resolved"/* ]]
+  local destination="$1" relative="$2" raw candidate expected
+  [[ -L "$destination" ]] || return 1
+  raw="$(readlink "$destination")" || return 1
+  if [[ "$raw" == /* ]]; then
+    candidate="$raw"
+  else
+    candidate="$(dirname "$destination")/$raw"
+  fi
+  candidate="$(normalize_absolute_path "$candidate")" || return 1
+  expected="$(normalize_absolute_path "$current_dir/$relative")" || return 1
+  [[ "$candidate" == "$expected" ]] || return 1
+
+  # A link into the exact expected generation is HomeWeave-owned even when a
+  # previous root deletion left it dangling. Preserve its raw value so a
+  # failed Stow transaction can restore the pre-operation state byte-for-byte.
+  if [[ ! -e "$destination" ]]; then
+    [[ "$destination" != *$'\t'* && "$destination" != *$'\n'* \
+      && "$raw" != *$'\t'* && "$raw" != *$'\n'* ]] || return 1
+    printf '%s\t%s\n' "$destination" "$raw" >>"$stale_links_file"
+  fi
+  return 0
+}
+
+restore_stale_managed_links() {
+  local destination raw
+  while IFS=$'\t' read -r destination raw; do
+    [[ -n "$destination" ]] || continue
+    if [[ ! -e "$destination" && ! -L "$destination" ]]; then
+      mkdir -p "$(dirname "$destination")"
+      ln -s "$raw" "$destination"
+    elif [[ -L "$destination" && "$(readlink "$destination")" == "$raw" ]]; then
+      :
+    else
+      printf 'warning: stale managed link changed during rollback: %s\n' "$destination" >&2
+    fi
+  done <"$stale_links_file"
+}
+
+remove_stale_managed_links() {
+  local destination raw
+  while IFS=$'\t' read -r destination raw; do
+    [[ -n "$destination" ]] || continue
+    [[ -L "$destination" ]] || continue
+    rm "$destination"
+  done <"$stale_links_file"
 }
 
 preflight_destinations() {
@@ -280,7 +343,7 @@ preflight_destinations() {
     relative="${staged#"$temp_dir"/}"
     destination="$HOME/$relative"
     if [[ -e "$destination" || -L "$destination" ]]; then
-      if is_current_link "$destination"; then
+      if is_current_link "$destination" "$relative"; then
         continue
       fi
       [[ -d "$destination" && ! -L "$destination" ]] \
@@ -292,7 +355,7 @@ preflight_destinations() {
     relative="${staged#"$temp_dir"/}"
     destination="$HOME/$relative"
     if [[ -e "$destination" || -L "$destination" ]]; then
-      is_current_link "$destination" || fail "destination conflict at $destination"
+      is_current_link "$destination" "$relative" || fail "destination conflict at $destination"
     fi
   done < <(find "$temp_dir" -mindepth 1 \( -type f -o -type l \) -print0)
 }
@@ -306,6 +369,7 @@ if [[ -d "$current_dir" ]]; then
 fi
 
 transaction_started=true
+remove_stale_managed_links
 mv "$temp_dir" "$current_dir"
 
 stow_preflight_output="$(mktemp)"
@@ -325,6 +389,7 @@ else
     stow --restow --no-folding --dir="$stow_root" --target="$HOME" current \
       || printf 'warning: automatic dotfile rollback could not restore links\n' >&2
   fi
+  restore_stale_managed_links
   transaction_started=false
   fail "Stow could not link the new generation; the previous generation was restored"
 fi

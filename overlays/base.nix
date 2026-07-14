@@ -45,6 +45,20 @@ let
     '';
   };
 
+  homeWeaveVerifiedInstaller = prev.writeShellApplication {
+    name = "home-weave-verified-installer";
+    runtimeInputs = with final; [
+      coreutils
+      curl
+      gawk
+      gnused
+      jq
+    ];
+    text = ''
+      exec ${final.bash}/bin/bash ${../lib/verified-installer.sh} "$@"
+    '';
+  };
+
   neovimPython = final.python3.withPackages (pythonPackages: [ pythonPackages.pynvim ]);
 
   neovimCorePackages = with final; [
@@ -91,6 +105,7 @@ in
 {
   home-weave-cli = homeWeaveCli;
   home-weave-env = homeWeaveEnv;
+  home-weave-verified-installer = homeWeaveVerifiedInstaller;
   inherit
     commonTerminalPackages
     commonToolPackages

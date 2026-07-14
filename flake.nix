@@ -183,6 +183,7 @@
               starship
               stow
               home-weave-env
+              home-weave-verified-installer
               ;
 
             home-weave = pkgs.home-weave-cli;
@@ -376,6 +377,23 @@
                   bash ${./tests/test-install-no-casks.sh} ${./install.sh}
                   touch $out
                 '';
+
+            verified-installer =
+              pkgs.runCommand "verified-installer-tests"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    coreutils
+                    gawk
+                    gnugrep
+                    jq
+                  ];
+                }
+                ''
+                  bash ${./tests/test-verified-installer.sh} \
+                    ${./lib/verified-installer.sh}
+                  touch $out
+                '';
           };
         }
       )
@@ -399,6 +417,10 @@
       };
 
       lib.dotfiles.path = ./dotfiles;
+      lib.verifiedInstaller = {
+        schemaVersion = 1;
+        program = ./lib/verified-installer.sh;
+      };
       lib.mkHomeWeaveApp = mkHomeWeaveApp;
       lib.packageCatalog = {
         base = [

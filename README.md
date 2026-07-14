@@ -130,6 +130,8 @@ home-weave profile diff work
 home-weave profile switch work
 home-weave status
 home-weave status --json
+home-weave logs
+home-weave logs --latest --tail 100
 home-weave snapshot create ~/home-weave-snapshot
 home-weave snapshot restore ~/home-weave-snapshot --root ~/.home-weave-restored
 home-weave restore git@gitlab.com:group/my-home-weave.git
@@ -202,6 +204,16 @@ formulae/casks on macOS, configured official Debian/Ubuntu APT repositories,
 and official Arch Pacman repositories. Unknown Linux distributions remain
 Nixpkgs-only. Third-party taps, AUR, and third-party APT/Pacman repositories
 are rejected; privileged plans print the exact command before confirmation.
+
+For software whose vendor documents `curl ... | sh`, use the reusable
+`home-weave-verified-installer` framework instead of copying that pipeline.
+An immutable distribution catalog must pin the HTTPS URL and SHA-256, list the
+reviewed official hosts and publisher, and record its review date. The helper
+downloads to a temporary file, verifies it, supports content inspection, uses
+a sanitized environment, refuses root execution, and requires an explicit
+provider approval token before `apply`. It never pipes network content to a
+shell. Distributions can consume `lib.verifiedInstaller.program` or the
+`home-weave-verified-installer` package from this flake.
 
 GUI applications launched from Finder, Spotlight, or a desktop menu generally
 do not source interactive shell files. Configure those applications with an
