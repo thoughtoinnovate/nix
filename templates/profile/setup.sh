@@ -65,7 +65,7 @@ command -v nix >/dev/null 2>&1 || {
 }
 
 if "$UPDATE_INPUTS"; then
-  nix "${NIX_FLAGS[@]}" flake update --flake "path:$ROOT"
+  nix "${NIX_FLAGS[@]}" --refresh flake update --flake "path:$ROOT"
   printf 'Updated profile inputs. Review and commit %s/flake.lock.\n' "$ROOT"
 fi
 

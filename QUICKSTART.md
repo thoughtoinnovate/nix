@@ -46,7 +46,7 @@ prerequisite. Official installation details and current platform notes are at
 Run the setup application:
 
 ```sh
-nix run github:thoughtoinnovate/nix#home-weave -- setup
+nix --refresh run github:thoughtoinnovate/nix#home-weave -- setup
 ```
 
 The interactive setup creates `~/.home-weave`, asks which shell and profile to
@@ -54,13 +54,13 @@ use, and offers to adopt selected existing dotfiles. Choose `--no-apply` when
 you want to review everything before installation:
 
 ```sh
-nix run github:thoughtoinnovate/nix#home-weave -- setup --no-apply
+nix --refresh run github:thoughtoinnovate/nix#home-weave -- setup --no-apply
 ```
 
 For a non-interactive lean development profile:
 
 ```sh
-nix run github:thoughtoinnovate/nix#home-weave -- setup \
+nix --refresh run github:thoughtoinnovate/nix#home-weave -- setup \
   --profile development --shell zsh --no-apply --yes
 ```
 
@@ -430,6 +430,7 @@ Enable the features for that invocation:
 
 ```sh
 nix --extra-experimental-features 'nix-command flakes' \
+  --refresh \
   run github:thoughtoinnovate/nix#home-weave -- setup
 ```
 

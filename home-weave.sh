@@ -306,6 +306,9 @@ parse_common_options() {
       --all) UNINSTALL_ALL=true; shift ;;
       --nuke) UNINSTALL_NUKE=true; UNINSTALL_ALL=true; shift ;;
       --yes|-y) ASSUME_YES=true; shift ;;
+      --refresh)
+        fail "--refresh is a Nix option; place it before 'run' (nix --refresh run ... -- setup)"
+        ;;
       --merge) RESTORE_MODE=merge; shift ;;
       --override) RESTORE_MODE=override; shift ;;
       --help|-h) usage; exit 0 ;;
@@ -2636,7 +2639,8 @@ update_command() {
   [[ -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
   start_operation_log update
   set_operation_phase nix-update
-  run_logged nix --extra-experimental-features 'nix-command flakes' flake update --flake "path:$ROOT" \
+  run_logged nix --extra-experimental-features 'nix-command flakes' --refresh \
+    flake update --flake "path:$ROOT" \
     || fail "Nix input update failed"
   printf 'Inputs updated. Review %s/flake.lock, then run home-weave plan.\n' "$ROOT"
   finish_operation_log success

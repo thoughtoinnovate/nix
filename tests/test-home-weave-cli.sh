@@ -14,7 +14,7 @@ TEST_HOME="$TEST_ROOT/home"
 mkdir -p "$TEST_HOME"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-grep -Fq 'flake update --flake "path:$ROOT"' "$TEMPLATE/setup.sh"
+grep -Fq -- '--refresh flake update --flake "path:$ROOT"' "$TEMPLATE/setup.sh"
 if grep -Fq 'find "$HOME" -type l' "$CLI"; then
   printf 'uninstall must not traverse the entire home to find stale links\n' >&2
   exit 1
@@ -29,6 +29,12 @@ run_cli() {
     PROVIDER_LOG="${PROVIDER_LOG:-}" \
     bash "$CLI" "$@"
 }
+
+if run_cli setup --refresh 2>"$TEST_ROOT/misplaced-refresh-error"; then
+  printf 'misplaced Nix --refresh option was incorrectly accepted by setup\n' >&2
+  exit 1
+fi
+grep -Fq "place it before 'run'" "$TEST_ROOT/misplaced-refresh-error"
 
 run_cli setup --yes --no-git --no-apply \
   --profile work --extends development \
@@ -238,7 +244,7 @@ EOF
 chmod +x "$TEST_ROOT/update-bin/nix"
 export UPDATE_NIX_LOG="$TEST_ROOT/update-nix.log"
 PATH="$TEST_ROOT/update-bin:$PATH" run_cli update >/dev/null
-grep -Fq "flake update --flake path:$ROOT" "$UPDATE_NIX_LOG"
+grep -Fq -- "--refresh flake update --flake path:$ROOT" "$UPDATE_NIX_LOG"
 
 # Uninstall removes only the active Stow generation, restores missing adopted
 # files, keeps the repository, and skips Home Manager without an apply marker.

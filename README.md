@@ -119,7 +119,7 @@ different interactive shell automatically.
 Start the interactive personal setup directly from GitHub:
 
 ```sh
-nix run github:thoughtoinnovate/nix#home-weave -- setup
+nix --refresh run github:thoughtoinnovate/nix#home-weave -- setup
 ```
 
 The command creates one user-owned, private Git repository:
@@ -253,7 +253,7 @@ Change `distributionUrl` in the generated flake, add company profiles under
 GitLab SSH authentication can then run:
 
 ```sh
-nix run 'git+ssh://git@example.org/owner/home-weave-distribution.git#home-weave' -- setup
+nix --refresh run 'git+ssh://git@example.org/owner/home-weave-distribution.git#home-weave' -- setup
 ```
 
 The work edition pins this public core, supplies work profiles and extensions,
