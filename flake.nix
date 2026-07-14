@@ -414,7 +414,7 @@
                   ];
                 }
                 ''
-                  bash ${./tests/test-public-dotfiles.sh} ${./dotfiles}
+                  bash ${./tests/test-public-dotfiles.sh} ${./dotfiles} ${./.}
                   touch $out
                 '';
 
