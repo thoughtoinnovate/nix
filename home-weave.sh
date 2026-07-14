@@ -1341,12 +1341,46 @@ reconcile_profile_providers() {
     done < <(jq -c '.items[] | select(.inventoryOnly == true)' <<<"$inventory")
 
     while IFS= read -r id; do
+      perform_install=false
+      replace_existing=false
       [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider package id: $id"
       [[ "$(jq --arg id "$id" '[.items[] | select(.id == $id)] | length' <<<"$inventory")" == 1 ]] \
         || fail "provider $provider_name must expose exactly one inventory item for $id"
       item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$inventory")"
       display_name="$(jq -r '.name // .id' <<<"$item")"
-      if [[ "$(jq -r '.installed // false' <<<"$item")" == true ]]; then
+      if [[ "$(jq -r '.preexistingCommand // false' <<<"$item")" == true ]]; then
+        "$command" plan --action install "$id" \
+          || fail "provider $provider_name could not plan replacement of $id"
+        if [[ "$mode" == plan ]]; then
+          state=planned-replacement
+          ownership=none
+        elif confirm "Replace the existing $display_name command through $provider_name (the original will be preserved)?"; then
+          perform_install=true
+          replace_existing=true
+        else
+          state=preexisting
+          ownership=provider
+          degraded=true
+          printf '  [%-18s] %-24s warning: pre-existing command retained; continuing with remaining items\n' \
+            "$provider_name" "$display_name"
+        fi
+      elif [[ "$(jq -r '.conflict // false' <<<"$item")" == true ]]; then
+        "$command" plan --action install "$id" \
+          || fail "provider $provider_name could not plan replacement of $id"
+        if [[ "$mode" == plan ]]; then
+          state=planned-replacement
+          ownership=none
+        elif confirm "Replace the conflicting $display_name destination through $provider_name (the original will be preserved)?"; then
+          perform_install=true
+          replace_existing=true
+        else
+          state=conflict
+          ownership=provider
+          degraded=true
+          printf '  [%-18s] %-24s warning: conflicting destination retained; continuing with remaining items\n' \
+            "$provider_name" "$display_name"
+        fi
+      elif [[ "$(jq -r '.installed // false' <<<"$item")" == true ]]; then
         state=preexisting
         ownership=provider
         printf '  [%-18s] %-24s already installed\n' "$provider_name" "$display_name"
@@ -1357,34 +1391,48 @@ reconcile_profile_providers() {
           state=planned
           ownership=none
         elif confirm "Install $display_name through $provider_name?"; then
-          if ! "$command" apply --action install "$id"; then
-            state=failed
-            ownership=provider
-            status="$(jq -cn --argjson items "$status" --argjson item "$item" \
-              --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
-              --arg removalPolicy "$removal_policy" '
-                $items + [($item + {provider: $provider, requested: true, state: $state,
-                  ownership: $ownership, removalPolicy: $removalPolicy})]
-              ')"
-            mkdir -p "$ROOT/.state"
-            jq -n --arg profile "$PROFILE" --argjson items "$status" \
-              '{schemaVersion: 1, profile: $profile, complete: false, degraded: true, items: $items}' \
-              >"$pending_file"
-            fail "provider $provider_name failed to install $id"
-          fi
-          refreshed="$($command inventory)" || fail "provider inventory failed after installing $id"
-          item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$refreshed")"
-          [[ "$(jq -r '.installed // false' <<<"$item")" == true ]] \
-            || fail "provider $provider_name did not verify $id after installation"
-          inventory="$refreshed"
-          state=installed
-          ownership=home-weave
+          perform_install=true
         else
           state=declined
           ownership=none
           degraded=true
           printf '  [%-18s] %-24s declined; profile will be marked degraded\n' "$provider_name" "$display_name"
         fi
+      fi
+      if "$perform_install"; then
+        unset install_status
+        if "$replace_existing"; then
+          HOME_WEAVE_VERIFIED_REPLACE_EXISTING=1 "$command" apply --action install "$id" \
+            || install_status=$?
+        else
+          "$command" apply --action install "$id" || install_status=$?
+        fi
+        if [[ "${install_status:-0}" != 0 ]]; then
+          state=failed
+          ownership=provider
+          status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+            --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
+            --arg removalPolicy "$removal_policy" '
+              $items + [($item + {provider: $provider, requested: true, state: $state,
+                ownership: $ownership, removalPolicy: $removalPolicy})]
+            ')"
+          mkdir -p "$ROOT/.state"
+          jq -n --arg profile "$PROFILE" --argjson items "$status" \
+            '{schemaVersion: 1, profile: $profile, complete: false, degraded: true, items: $items}' \
+            >"$pending_file"
+          fail "provider $provider_name failed to install $id"
+        fi
+        unset install_status
+        refreshed="$($command inventory)" || fail "provider inventory failed after installing $id"
+        item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$refreshed")"
+        [[ "$(jq -r '.installed // false' <<<"$item")" == true ]] \
+          || fail "provider $provider_name did not verify $id after installation"
+        if "$replace_existing" && [[ "$(jq -r '.publisherVerified // false' <<<"$item")" != true ]]; then
+          fail "provider $provider_name did not verify the replacement for $id"
+        fi
+        inventory="$refreshed"
+        state=installed
+        ownership=home-weave
       fi
       status="$(jq -cn --argjson items "$status" --argjson item "$item" \
         --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \

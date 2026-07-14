@@ -228,6 +228,7 @@ artifact_paths() {
   APP_PATH="$(home_path "$(jq -r '.install.destination' <<<"$item")")"
   APP_EXECUTABLE="$APP_PATH/$(jq -r '.install.executable' <<<"$item")"
   LINK_PATH="$(home_path "$(jq -r '.install.link' <<<"$item")")"
+  LINK_BACKUP_PATH="${LINK_PATH}.home-weave-preexisting"
 }
 
 verified_team_id() {
@@ -240,13 +241,13 @@ verified_team_id() {
 
 artifact_inventory_item() {
   local item="$1" installed=false version="" evidence="not detected" verified=false team expected
+  local preexisting_command=false conflict=false replaced_command=false version_executable=""
   local -a version_args=()
   artifact_paths "$item"
   expected="$(jq -r '.install.appleTeamId' <<<"$item")"
   if [[ -x "$APP_EXECUTABLE" ]]; then
     installed=true
-    while IFS= read -r argument; do version_args+=("$argument"); done < <(jq -r '.install.versionArguments[]? // "--version"' <<<"$item")
-    version="$("$APP_EXECUTABLE" "${version_args[@]}" 2>/dev/null | head -n 1 || true)"
+    version_executable="$APP_EXECUTABLE"
     evidence="executable:$APP_EXECUTABLE"
     team="$(verified_team_id "$APP_PATH" "$expected" || true)"
     if [[ "$team" == "$expected" ]]; then
@@ -255,10 +256,32 @@ artifact_inventory_item() {
     else
       evidence+=";apple-team-id:${team:-missing};signature-unverified"
     fi
+    if [[ -e "$LINK_BACKUP_PATH" || -L "$LINK_BACKUP_PATH" ]]; then
+      replaced_command=true
+      evidence+=";preserved-command:$LINK_BACKUP_PATH"
+    fi
+  elif [[ -e "$LINK_PATH" || -L "$LINK_PATH" ]]; then
+    evidence="preexisting-command:$LINK_PATH;publisher-unverified"
+    if [[ -x "$LINK_PATH" ]]; then
+      installed=true
+      preexisting_command=true
+      version_executable="$LINK_PATH"
+    else
+      conflict=true
+      evidence+=";not-executable"
+    fi
   fi
-  jq -cn --argjson installed "$installed" --argjson verified "$verified" --arg version "$version" --arg evidence "$evidence" \
+  if [[ -n "$version_executable" ]]; then
+    while IFS= read -r argument; do version_args+=("$argument"); done < <(jq -r '.install.versionArguments[]? // "--version"' <<<"$item")
+    version="$("$version_executable" "${version_args[@]}" 2>/dev/null | head -n 1 || true)"
+  fi
+  jq -cn --argjson installed "$installed" --argjson verified "$verified" \
+    --argjson preexistingCommand "$preexisting_command" --argjson conflict "$conflict" \
+    --argjson replacedCommand "$replaced_command" \
+    --arg version "$version" --arg evidence "$evidence" \
     --argjson item "$item" '{id:$item.id,name:$item.name,kind:"cli",installed:$installed,
       version:(if $version == "" then null else $version end),inventoryOnly:false,
+      preexistingCommand:$preexistingCommand,conflict:$conflict,replacedCommand:$replacedCommand,
       repositoryTrust:$item.repositoryTrust,publisher:$item.publisher,publisherVerified:$verified,
       publisherEvidence:$item.publisherEvidence,evidence:$evidence}'
 }
@@ -281,11 +304,20 @@ show_dmg_plan() {
 }
 
 install_dmg() {
-  local item="$1" release="$2" download_url temp dmg mount bundle expected actual team copied=0 mounted=0 completed=0
+  local item="$1" release="$2" download_url temp dmg mount bundle expected actual team
+  local copied=0 mounted=0 completed=0 backed_up_link=0
   artifact_paths "$item"
   [[ "${EUID:-$(id -u)}" != 0 ]] || die "verified artifact installers may not run as root"
   [[ ! -e "$APP_PATH" && ! -L "$APP_PATH" ]] || die "application destination already exists: $APP_PATH"
-  [[ ! -e "$LINK_PATH" && ! -L "$LINK_PATH" ]] || die "command destination already exists: $LINK_PATH"
+  if [[ -e "$LINK_PATH" || -L "$LINK_PATH" ]]; then
+    [[ "${HOME_WEAVE_VERIFIED_REPLACE_EXISTING:-0}" == 1 ]] \
+      || die "command destination already exists: $LINK_PATH"
+    [[ ! -e "$LINK_BACKUP_PATH" && ! -L "$LINK_BACKUP_PATH" ]] \
+      || die "preserved command backup already exists: $LINK_BACKUP_PATH"
+    mv "$LINK_PATH" "$LINK_BACKUP_PATH"
+    backed_up_link=1
+    printf 'Preserved existing command at %s.\n' "$LINK_BACKUP_PATH" >&2
+  fi
   expected="$(jq -r '.install.appleTeamId' <<<"$item")"
   download_url="$(jq -r '.release.downloadBaseUrl' <<<"$item")/$(encode_download_path "$(jq -r '.download' <<<"$release")")"
   temp="$(mktemp -d "${TMPDIR:-/tmp}/home-weave-artifact.XXXXXX")"; dmg="$temp/artifact.dmg"; mount="$temp/mount"; mkdir -p "$mount"
@@ -293,23 +325,37 @@ install_dmg() {
     local status=$?
     trap - EXIT
     [[ "$mounted" == 1 ]] && "$HDIUTIL_BIN" detach "$mount" -quiet >/dev/null 2>&1 || true
-    if [[ "$completed" != 1 && "$copied" == 1 ]]; then [[ -L "$LINK_PATH" ]] && rm -f "$LINK_PATH"; rm -rf "$APP_PATH"; fi
+    if [[ "$completed" != 1 ]]; then
+      [[ ! -L "$LINK_PATH" ]] || rm -f "$LINK_PATH"
+      [[ "$copied" != 1 ]] || rm -rf "$APP_PATH"
+      if [[ "$backed_up_link" == 1 && ( -e "$LINK_BACKUP_PATH" || -L "$LINK_BACKUP_PATH" ) ]]; then
+        mv "$LINK_BACKUP_PATH" "$LINK_PATH"
+      fi
+    fi
     rm -rf "$temp"
     exit "$status"
   }
   trap cleanup_artifact EXIT
-  "$CURL_BIN" --proto '=https' --tlsv1.2 -fsSL -o "$dmg" "$download_url" || die "could not download the reviewed artifact"
+  printf 'Downloading %s %s with verified HTTPS transport...\n' \
+    "$(jq -r '.name' <<<"$item")" "$(jq -r '.version' <<<"$release")" >&2
+  "$CURL_BIN" --proto '=https' --tlsv1.2 --fail --location --show-error \
+    --progress-bar --output "$dmg" "$download_url" || die "could not download the reviewed artifact"
+  printf 'Download complete. Verifying SHA-256...\n' >&2
   actual="$(sha256sum "$dmg" | awk '{print $1}')"
   [[ "$actual" == "$(jq -r '.sha256' <<<"$release")" ]] || die "artifact checksum mismatch"
+  printf 'SHA-256 verified. Mounting read-only image...\n' >&2
   "$HDIUTIL_BIN" attach "$dmg" -nobrowse -readonly -mountpoint "$mount" >/dev/null || die "could not mount verified DMG"
   mounted=1; bundle="$mount/$(jq -r '.install.bundle' <<<"$item")"; [[ -d "$bundle" ]] || die "verified DMG does not contain configured application bundle"
+  printf 'Image mounted. Verifying Apple signature and Team ID...\n' >&2
   team="$(verified_team_id "$bundle" "$expected" || true)"; [[ "$team" == "$expected" ]] || die "application signature does not match configured Apple Team ID"
   mkdir -p "$(dirname "$APP_PATH")" "$(dirname "$LINK_PATH")"
+  printf 'Signature verified. Copying application to %s...\n' "$APP_PATH" >&2
   "$DITTO_BIN" "$bundle" "$APP_PATH" || die "could not copy verified application"; copied=1
   team="$(verified_team_id "$APP_PATH" "$expected" || true)"; [[ "$team" == "$expected" ]] || die "copied application failed Apple signature verification"
   [[ -x "$APP_EXECUTABLE" ]] || die "application does not contain configured executable"
   ln -s "$APP_EXECUTABLE" "$LINK_PATH"
   completed=1; "$HDIUTIL_BIN" detach "$mount" -quiet >/dev/null 2>&1 || true; mounted=0; rm -rf "$temp"; trap - EXIT
+  printf 'Installation complete: %s -> %s\n' "$LINK_PATH" "$APP_EXECUTABLE" >&2
 }
 
 run_dmg_action() {
@@ -317,16 +363,47 @@ run_dmg_action() {
   require_macos_tools
   artifact_paths "$item"
   case "$action" in
-    plan-install) release="$(resolve_dmg_release "$item")"; show_dmg_plan "$item" "$release" ;;
+    plan-install)
+      inventory="$(artifact_inventory_item "$item")"
+      if [[ "$(jq -r '.preexistingCommand' <<<"$inventory")" == true ]]; then
+        printf 'Warning: %s already exists at %s and publisher verification is unavailable.\n' \
+          "$(jq -r '.name' <<<"$item")" "$LINK_PATH" >&2
+        printf '  Choices during apply: skip safely, or replace after preserving it at %s.\n' "$LINK_BACKUP_PATH" >&2
+      elif [[ "$(jq -r '.conflict' <<<"$inventory")" == true ]]; then
+        printf 'Warning: destination %s already exists but is not executable.\n' "$LINK_PATH" >&2
+        printf '  Choices during apply: skip safely, or replace after preserving it at %s.\n' "$LINK_BACKUP_PATH" >&2
+      fi
+      release="$(resolve_dmg_release "$item")"; show_dmg_plan "$item" "$release"
+      ;;
     apply-install)
       inventory="$(artifact_inventory_item "$item")"
-      [[ "$(jq -r '.installed' <<<"$inventory")" == true ]] && { printf '%s is already installed.\n' "$(jq -r '.name' <<<"$item")" >&2; return; }
+      if [[ "$(jq -r '.preexistingCommand' <<<"$inventory")" == true ]]; then
+        if [[ "${HOME_WEAVE_VERIFIED_REPLACE_EXISTING:-0}" != 1 ]]; then
+          printf 'Warning: %s already exists at %s; retaining the pre-existing command without claiming ownership.\n' \
+            "$(jq -r '.name' <<<"$item")" "$LINK_PATH" >&2
+          return 0
+        fi
+      elif [[ "$(jq -r '.conflict' <<<"$inventory")" == true ]]; then
+        if [[ "${HOME_WEAVE_VERIFIED_REPLACE_EXISTING:-0}" != 1 ]]; then
+          printf 'Warning: destination %s already exists but is not executable; skipping installation without overwriting it.\n' "$LINK_PATH" >&2
+          return 0
+        fi
+      elif [[ "$(jq -r '.installed' <<<"$inventory")" == true ]]; then
+        printf '%s is already installed.\n' "$(jq -r '.name' <<<"$item")" >&2
+        return 0
+      fi
       release="$(resolve_dmg_release "$item")"; show_dmg_plan "$item" "$release"; install_dmg "$item" "$release" ;;
     plan-remove) [[ -x "$APP_EXECUTABLE" ]] || die "application is not installed"; printf 'Verified application removal plan: remove %s and owned link %s\n' "$APP_PATH" "$LINK_PATH" >&2 ;;
     apply-remove)
-      [[ -x "$APP_EXECUTABLE" ]] || return 0
-      if [[ -L "$LINK_PATH" && "$(readlink "$LINK_PATH")" == "$APP_EXECUTABLE" ]]; then rm "$LINK_PATH"; fi
-      rm -rf "$APP_PATH" ;;
+      if [[ -x "$APP_EXECUTABLE" ]]; then
+        if [[ -L "$LINK_PATH" && "$(readlink "$LINK_PATH")" == "$APP_EXECUTABLE" ]]; then rm "$LINK_PATH"; fi
+        rm -rf "$APP_PATH"
+      fi
+      if [[ ! -e "$LINK_PATH" && ! -L "$LINK_PATH" && ( -e "$LINK_BACKUP_PATH" || -L "$LINK_BACKUP_PATH" ) ]]; then
+        mv "$LINK_BACKUP_PATH" "$LINK_PATH"
+        printf 'Restored preserved command to %s.\n' "$LINK_PATH" >&2
+      fi
+      ;;
     *) die "unsupported artifact action: $action" ;;
   esac
 }
