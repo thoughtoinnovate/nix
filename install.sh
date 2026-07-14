@@ -435,13 +435,24 @@ $MARKER
           builtins.elem (packageLib.getName pkg) [ $UNFREE_PACKAGES ];
         config.allowUnsupportedSystem = true;
       };
-      packageGroupNames = builtins.attrNames pkgs.homeWeavePackageGroups;
+      packageGroupNames = builtins.attrNames nix-base.lib.packageCatalog.groups;
+      catalogLeaf = attribute:
+        let parts = packageLib.splitString "." attribute;
+        in packageLib.last parts;
+      basePackageNames = map catalogLeaf nix-base.lib.packageCatalog.base;
+      developmentPackageNames = map catalogLeaf nix-base.lib.packageCatalog.development;
+      groupPackageNames = packageLib.mapAttrs
+        (_: packages: map catalogLeaf packages)
+        nix-base.lib.packageCatalog.groups;
       groupFor = package:
-        let matches = builtins.filter
-          (group: builtins.elem (toString package) (map toString pkgs.homeWeavePackageGroups.\${group}))
-          packageGroupNames;
+        let
+          name = packageLib.getName package;
+          matches = builtins.filter
+            (group: builtins.elem name groupPackageNames.\${group})
+            packageGroupNames;
         in if matches != [] then builtins.head matches
-          else if builtins.elem (toString package) (map toString pkgs.leanDevelopmentPackages) then "development"
+          else if builtins.elem name developmentPackageNames then "development"
+          else if builtins.elem name basePackageNames then "base"
           else "base";
       inheritedFor = group:
         if group == "base" && "$PROFILE" != "base" then "base"
@@ -497,7 +508,7 @@ nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_FLAKE"
 
 preflight_activation() {
   local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 substitution_count=0 unfree_name=""
-  local download_bytes=0 large_build=false
+  local download_bytes=0 large_build=false inventory_file inventory_temp
   output_file="$(mktemp)"
   data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
   mkdir -p "$data_root"
@@ -555,6 +566,16 @@ preflight_activation() {
       [[ "$answer" == y || "$answer" == Y ]] || fail "activation cancelled after preflight"
     fi
   fi
+  inventory_file="$data_root/last-inventory.json"
+  inventory_temp="$inventory_file.tmp.$$"
+  if ! nix "${NIX_FLAGS[@]}" eval --json \
+    "$CONFIG_FLAKE#homeWeaveInventory.$SYSTEM" >"$inventory_temp"; then
+    rm -f "$inventory_temp"
+    fail "could not evaluate activation inventory; no active state was changed"
+  fi
+  jq -e 'type == "array"' "$inventory_temp" >/dev/null \
+    || fail "activation inventory is invalid; no active state was changed"
+  mv "$inventory_temp" "$inventory_file"
   rm -f "$output_file"
 }
 

@@ -5,6 +5,10 @@ set -Eeuo pipefail
 CLI="$(realpath "$1")"
 TEMPLATE="$(realpath "$2")"
 ENV_RENDERER="$(realpath "$3")"
+grep -Fq 'last-inventory.json' "$CLI" || {
+  printf 'receipt generation does not consume preflight inventory\n' >&2
+  exit 1
+}
 TEST_ROOT="$(realpath "$(mktemp -d)")"
 TEST_HOME="$TEST_ROOT/home"
 mkdir -p "$TEST_HOME"

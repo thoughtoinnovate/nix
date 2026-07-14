@@ -24,6 +24,18 @@ grep -Fq "'.substitutions | length'" "$installer" || {
   printf 'cached preflight substitution count is not derived safely from JSON\n' >&2
   exit 1
 }
+if grep -Fq 'map toString pkgs.homeWeavePackageGroups' "$installer"; then
+  printf 'inventory grouping still evaluates every optional package derivation\n' >&2
+  exit 1
+fi
+grep -Fq 'nix-base.lib.packageCatalog.groups' "$installer" || {
+  printf 'inventory grouping does not use inert package catalog names\n' >&2
+  exit 1
+}
+grep -Fq 'last-inventory.json' "$installer" || {
+  printf 'preflight does not persist receipt inventory before activation\n' >&2
+  exit 1
+}
 
 function_body="$(sed -n '/^install_macos_apps() {/,/^}/p' "$installer")"
 [[ -n "$function_body" ]] || {

@@ -1425,6 +1425,7 @@ record_receipt() {
   receipt="$receipts/${timestamp//:/-}.json"
   temporary="$receipt.tmp.$$"
   mkdir -p "$receipts"
+  printf 'Recording activation receipt...\n'
   profiles="$(profile_metadata)"
   system="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --impure --raw --expr builtins.currentSystem)"
@@ -1433,8 +1434,11 @@ record_receipt() {
   else
     revision="$(jq -r '.nodes.nixpkgs.locked.rev // "unknown"' "$ROOT/flake.lock" 2>/dev/null || printf unknown)"
   fi
-  inventory="$(nix --extra-experimental-features 'nix-command flakes' \
-    eval --json "path:$ROOT/.state/generated#homeWeaveInventory.$system" 2>/dev/null || printf '[]')"
+  [[ -r "$ROOT/.state/last-inventory.json" ]] \
+    || fail "activation inventory is missing; receipt cannot be recorded"
+  inventory="$(<"$ROOT/.state/last-inventory.json")"
+  jq -e 'type == "array"' >/dev/null <<<"$inventory" \
+    || fail "activation inventory is invalid; receipt cannot be recorded"
   [[ ! -r "$ROOT/.state/last-preflight.json" ]] || preflight="$(<"$ROOT/.state/last-preflight.json")"
   if [[ -d "$ROOT/.state/dotfiles/current" ]]; then
     dotfiles="$(find "$ROOT/.state/dotfiles/current" -mindepth 1 \( -type f -o -type l \) -print \
