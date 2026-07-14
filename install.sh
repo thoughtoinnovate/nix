@@ -496,7 +496,7 @@ mv "$TEMP_FLAKE" "$TARGET_FLAKE"
 nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_FLAKE"
 
 preflight_activation() {
-  local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 unfree_name=""
+  local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 substitution_count=0 unfree_name=""
   local download_bytes=0 large_build=false
   output_file="$(mktemp)"
   data_root="${HOME_WEAVE_DATA_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/$NAMESPACE}"
@@ -530,14 +530,17 @@ preflight_activation() {
   download_bytes="$(jq -r '.downloadBytes' "$data_root/last-preflight.json")"
   substitutions="$(jq -r '.substitutions[]' "$data_root/last-preflight.json")"
   local_builds="$(jq -r '.localBuilds[]' "$data_root/last-preflight.json")"
-  local_build_count="$(grep -c . <<<"$local_builds" | tr -d ' ')"
+  # `grep -c` exits 1 for an empty list. With `set -e -o pipefail` that made a
+  # fully cached activation abort without an error even though Nix succeeded.
+  local_build_count="$(jq -r '.localBuilds | length' "$data_root/last-preflight.json")"
+  substitution_count="$(jq -r '.substitutions | length' "$data_root/last-preflight.json")"
   if ((local_build_count > 20)) || grep -Eqi '(rustc|cargo|golang|go-[0-9]|jdk|gradle|jupyter|vscode|minikube|terraform|llvm|clang).*\.drv' <<<"$local_builds"; then
     large_build=true
   fi
   printf '\nHomeWeave preflight:\n'
   printf '  Compressed download: %s\n' "${download_size:-0 B (cached)}"
   printf '  Expanded closure:   %s\n' "${closure_size:-0 B (cached)}"
-  printf '  Cache substitutions: %s\n' "$(grep -c . <<<"$substitutions" | tr -d ' ')"
+  printf '  Cache substitutions: %s\n' "$substitution_count"
   printf '  Required local builds: %s\n' "$local_build_count"
   printf '  Unfree packages: %s\n' "$(jq -r '.unfreePackages | if length == 0 then "none" else join(", ") end' "$data_root/last-preflight.json")"
   printf '  Unsupported packages: %s\n' "$(jq -r '.unsupportedPackages | if length == 0 then "none" else join(", ") end' "$data_root/last-preflight.json")"

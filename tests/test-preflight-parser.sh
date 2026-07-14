@@ -15,6 +15,15 @@ jq -e '.downloadBytes == 537395200 and .closureSize == "1.4 GiB" and
   (.substitutions | length) == 1 and (.localBuilds | length) == 0 and
   .unfreePackages == ["vscode"]' "$TEMP/cached.json" >/dev/null
 
+# A completely cached dry-run produces no Nix output. It must still become a
+# valid zero-impact report instead of aborting under `set -e -o pipefail`.
+: >"$TEMP/empty"
+bash "$REPORTER" --input "$TEMP/empty" --output "$TEMP/empty.json" --system aarch64-darwin --unfree ''
+jq -e '.downloadBytes == 0 and .downloadSize == "0 B" and
+  (.substitutions | length) == 0 and (.localBuilds | length) == 0 and
+  (.unfreePackages | length) == 0 and (.unsupportedPackages | length) == 0' \
+  "$TEMP/empty.json" >/dev/null
+
 cat >"$TEMP/local" <<'EOF'
 these 1 derivations will be built:
   /nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-starship-1.26.0.drv

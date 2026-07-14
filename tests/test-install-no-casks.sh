@@ -16,6 +16,14 @@ if grep -Eq '\$CONFIG_DIR#|flake lock "\$CONFIG_DIR"|switch --flake "\$CONFIG_DI
   printf 'a generated flake invocation still uses the Git-filtered directory reference\n' >&2
   exit 1
 fi
+grep -Fq "'.localBuilds | length'" "$installer" || {
+  printf 'cached preflight local-build count is not derived safely from JSON\n' >&2
+  exit 1
+}
+grep -Fq "'.substitutions | length'" "$installer" || {
+  printf 'cached preflight substitution count is not derived safely from JSON\n' >&2
+  exit 1
+}
 
 function_body="$(sed -n '/^install_macos_apps() {/,/^}/p' "$installer")"
 [[ -n "$function_body" ]] || {
