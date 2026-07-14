@@ -124,7 +124,10 @@ in
                 parent.dotfileLayers
             );
             localLayer = lib.optional (checkedAdditions != [ ]) {
-              name = "${sourceName}:${name}";
+              # Layer identifiers share the strict portable identifier syntax
+              # used by distribution and profile names. A colon was previously
+              # generated here even though the composer correctly rejects it.
+              name = "${sourceName}--${name}";
               source = {
                 kind = "nix";
                 path = "${toString sourceRoot}/dotfiles";

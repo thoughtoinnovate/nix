@@ -306,6 +306,10 @@
               assert darwin.profiles.child.allowUnfree == [ "claude-code" ];
               assert darwin.profiles.child.nativePackages.homebrewFormulae == [ "vault" ];
               assert darwin.profiles.child.providerPackages.company == [ "approved-app" ];
+              assert map (layer: layer.name) darwin.profiles.child.dotfileLayers == [
+                "fixture--base"
+                "fixture--child"
+              ];
               assert linux.profiles.child.nativePackages.apt == [ "curl" ];
               pkgs.runCommand "profile-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
                 jq -e . ${./schemas/home-weave-v2.schema.json} >/dev/null
