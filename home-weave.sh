@@ -1897,11 +1897,30 @@ restore_adopted_backups() {
 }
 
 uninstall_home_manager() {
-  local generated="$ROOT/.state/generated"
-  [[ -f "$ROOT/.state/applied" || -f "$ROOT/.state/home-manager-pending" ]] || {
+  local generated="$ROOT/.state/generated" receipt="" receipt_generation="" current_generation=""
+  local has_marker=false has_matching_receipt=false
+  [[ ! -f "$ROOT/.state/applied" && ! -f "$ROOT/.state/home-manager-pending" ]] || has_marker=true
+  if [[ -L "$ROOT/.state/receipts/latest" ]]; then
+    receipt="$(readlink -f "$ROOT/.state/receipts/latest" 2>/dev/null || true)"
+  fi
+  if [[ -n "$receipt" && -r "$receipt" ]] \
+    && jq -e '.schemaVersion == 1 and (.rollback.currentHomeManagerGeneration | type == "string")' \
+      "$receipt" >/dev/null 2>&1; then
+    receipt_generation="$(jq -r '.rollback.currentHomeManagerGeneration' "$receipt")"
+    current_generation="$(readlink -f "${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-manager" 2>/dev/null || true)"
+    if [[ -n "$receipt_generation" && "$receipt_generation" == "$current_generation" ]]; then
+      has_matching_receipt=true
+    elif [[ -n "$receipt_generation" && -n "$current_generation" ]]; then
+      fail "the latest receipt does not own the current Home Manager generation; refusing to remove another environment or delete uninstall evidence"
+    fi
+  fi
+  if [[ "$has_marker" == false && "$has_matching_receipt" == false ]]; then
     printf 'No HomeWeave activation marker was found; Home Manager uninstall was skipped.\n'
     return
-  }
+  fi
+  if [[ "$has_marker" == false ]]; then
+    printf 'Activation receipt matches the current Home Manager generation; recovering the missing uninstall marker.\n'
+  fi
   printf 'Home Manager will remove its managed packages, files, and generations.\n'
   "$DRY_RUN" && return 0
   [[ -f "$generated/flake.nix" ]] || fail "generated Home Manager configuration is missing"

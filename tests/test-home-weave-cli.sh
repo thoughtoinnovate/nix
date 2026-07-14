@@ -243,17 +243,25 @@ rm -f "$ROOT/.state/home-manager-pending"
 
 # Generated runtime state is intentionally ignored by Git. Uninstall must use
 # an explicit path flake so it remains visible when the HomeWeave root is a Git
-# repository.
+# repository. A matching successful receipt is sufficient ownership evidence
+# when an older activation omitted the applied marker.
 mkdir -p "$ROOT/.state/generated" "$TEST_ROOT/uninstall-bin"
 printf '{ outputs = _: { }; }\n' >"$ROOT/.state/generated/flake.nix"
-touch "$ROOT/.state/home-manager-pending"
+owned_generation="$TEST_ROOT/home-manager-owned-generation"
+mkdir -p "$owned_generation" "$TEST_HOME/.local/state/nix/profiles"
+ln -sfn "$owned_generation" "$TEST_HOME/.local/state/nix/profiles/home-manager"
+jq --arg generation "$owned_generation" \
+  '.rollback.currentHomeManagerGeneration = $generation' \
+  "$ROOT/.state/receipts/fixture.json" >"$ROOT/.state/receipts/fixture.json.tmp"
+mv "$ROOT/.state/receipts/fixture.json.tmp" "$ROOT/.state/receipts/fixture.json"
 cat >"$TEST_ROOT/uninstall-bin/nix" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$UNINSTALL_NIX_LOG"
 EOF
 chmod +x "$TEST_ROOT/uninstall-bin/nix"
 export UNINSTALL_NIX_LOG="$TEST_ROOT/uninstall-nix.log"
-PATH="$TEST_ROOT/uninstall-bin:$PATH" run_cli uninstall --all --yes >/dev/null
+receipt_uninstall_output="$(PATH="$TEST_ROOT/uninstall-bin:$PATH" run_cli uninstall --all --yes)"
+grep -Fq 'recovering the missing uninstall marker' <<<"$receipt_uninstall_output"
 grep -Fq "run path:$ROOT/.state/generated#home-manager -- uninstall" "$UNINSTALL_NIX_LOG"
 test ! -e "$ROOT/.state/home-manager-pending"
 
@@ -265,6 +273,14 @@ dry_run_output="$(run_cli uninstall nuke --dry-run --yes)"
 grep -Fq 'Would delete HomeWeave-owned root' <<<"$dry_run_output"
 dry_run_output="$(run_cli uninstall all --dry-run --yes)"
 grep -Fq 'Repository retained' <<<"$dry_run_output"
+other_generation="$TEST_ROOT/home-manager-other-generation"
+mkdir -p "$other_generation"
+ln -sfn "$other_generation" "$TEST_HOME/.local/state/nix/profiles/home-manager"
+if run_cli uninstall --all --dry-run --yes 2>"$TEST_ROOT/generation-mismatch-error"; then
+  printf 'expected a receipt generation mismatch to stop uninstall\n' >&2
+  exit 1
+fi
+grep -Fq 'does not own the current Home Manager generation' "$TEST_ROOT/generation-mismatch-error"
 printf 'must-remain\n' >"$ROOT/.state/active-profile"
 if run_cli uninstall nuke --yes 2>"$TEST_ROOT/nuke-confirmation-error"; then
   printf 'expected non-interactive nuke to fail before making changes\n' >&2

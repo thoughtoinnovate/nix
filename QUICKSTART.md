@@ -449,6 +449,12 @@ pending HomeWeave generations, but intentionally retains Nix and cached paths
 in `/nix/store`. A cached package is harmless and is not active unless a
 profile still references it.
 
+Current HomeWeave accepts a latest successful receipt whose recorded Home
+Manager generation matches the current generation when the older
+`.state/applied` marker is missing. It completes Home Manager removal before
+deleting the root. A receipt-generation mismatch stops nuke so ownership
+evidence is not destroyed.
+
 For installations made by an older HomeWeave version, inspect ownership before
 removing anything:
 
