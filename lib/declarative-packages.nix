@@ -64,11 +64,19 @@ in
           checkedUrl = require (host != null && builtins.elem host officialHosts)
             "Declarative package ${id} URL must use HTTPS and a reviewed official host"
             url;
-          src = prev.fetchurl {
+          format = checkedPlatform.format or "archive";
+          # Some official broker endpoints return an archive from a URL whose
+          # final path component has no suffix. Give explicitly typed sources
+          # a deterministic filename so Nix's unpack phase selects the right
+          # unpacker instead of rejecting the extensionless store path.
+          sourceName =
+            if format == "zip" then "${checkedId}-${version}.zip"
+            else if format == "gzip" then "${checkedId}-${version}.gz"
+            else null;
+          src = prev.fetchurl ({
             url = checkedUrl;
             hash = checkedPlatform.sha256 or (throw "Declarative package ${id} is missing SHA-256");
-          };
-          format = checkedPlatform.format or "archive";
+          } // lib.optionalAttrs (sourceName != null) { name = sourceName; });
           install = checkedPlatform.install or { kind = "copy-tree"; };
           installKind = install.kind or "copy-tree";
           sourceRootValue = checkedPlatform.sourceRoot or null;

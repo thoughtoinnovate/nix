@@ -74,6 +74,14 @@ providers are explicit under the target platform:
 }
 ```
 
+The public `base`, lean `development`, internal tool bundles, and optional
+group package selections have one canonical source at
+`catalogs/packages.json`. Its versioned schema is
+`schemas/package-catalog-v1.schema.json`. Nix modules and overlays interpret
+that catalog; they do not maintain separate copies of the package lists. This
+is the only supported catalog format; legacy Nix package-list catalogs are not
+loaded.
+
 Each package has exactly one declared source; HomeWeave never silently falls
 back to another manager or raw installer. URL-based software belongs in a
 reviewed provider that owns its URL, hash/signature checks, receipt, and
@@ -289,10 +297,8 @@ are not required.
 GUI applications launched from Finder, Spotlight, or a desktop menu generally
 do not source interactive shell files. Configure those applications with an
 explicit Nix executable path or wrapper instead of relying on `.zshrc` or an
-equivalent file. For example, an AWS-backed Claude Desktop MCP server can set
-`AWS_PROFILE` explicitly while the AWS SDK reads `~/.aws/config`, the local
-credentials file, or the AWS SSO cache. Keep AWS credentials and tokens in
-those local stores or a secret manager, never in a dotfile component.
+equivalent file. Keep credentials and tokens in a local credential store or
+secret manager, never in a dotfile component.
 
 Profile defaults live in `lib.setup.defaults`; `--shell` and `--profile`
 override them. Dotfile layers are composed in their declared order before Stow

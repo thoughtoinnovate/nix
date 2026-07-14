@@ -6,7 +6,7 @@
 }:
 let
   cfg = config.homeWeave.base;
-  catalog = import ../../lib/package-catalog.nix;
+  catalog = builtins.fromJSON (builtins.readFile ../../catalogs/packages.json);
   packageFor = name:
     lib.attrByPath (lib.splitString "." name) (throw "Nix package is unavailable: ${name}") pkgs;
 in
@@ -34,18 +34,7 @@ in
     };
 
     packageGroups = lib.mkOption {
-      type = lib.types.listOf (
-        lib.types.enum [
-          "python"
-          "data-jupyter"
-          "go"
-          "rust"
-          "java"
-          "web"
-          "cloud"
-          "desktop"
-        ]
-      );
+      type = lib.types.listOf (lib.types.enum (builtins.attrNames catalog.groups));
       default = [ ];
       description = "Optional, named HomeWeave package groups.";
     };

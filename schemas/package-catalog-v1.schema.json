@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/package-catalog-v1.schema.json",
+  "title": "HomeWeave public package selection catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "base", "development", "bundles", "groups"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schemaVersion": {"const": 1},
+    "base": {"$ref": "#/$defs/packageList"},
+    "development": {"$ref": "#/$defs/packageList"},
+    "bundles": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      "additionalProperties": {"$ref": "#/$defs/packageList"}
+    },
+    "groups": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+      "additionalProperties": {"$ref": "#/$defs/packageList"}
+    }
+  },
+  "$defs": {
+    "packageList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9+_-]+(\\.[A-Za-z0-9+_-]+)*$"
+      },
+      "uniqueItems": true
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 3,
+  "distribution": {"name": "fixture"},
+  "defaults": {"profile": "child"},
+  "profiles": {
+    "base": {
+      "extends": null,
+      "shells": ["zsh"],
+      "primaryShell": "zsh",
+      "dotfiles": ["common", "nvim"],
+      "packages": {"nix": ["jq"]},
+      "platforms": {
+        "macos": {
+          "packages": {
+            "nix": [{"name": "claude-code", "allowUnfree": true}],
+            "homebrew": {"formulae": ["vault"]},
+            "providers": {"company": ["approved-app"]}
+          }
+        },
+        "linux": {
+          "distributions": {
+            "ubuntu": {"packages": {"apt": ["curl"]}}
+          }
+        }
+      }
+    },
+    "child": {
+      "extends": "base",
+      "exclude": {"dotfiles": ["nvim"], "packages": {"nix": ["jq"]}},
+      "dotfiles": ["work-nvim"],
+      "packages": {"nix": ["ripgrep"]}
+    }
+  }
+}

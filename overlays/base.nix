@@ -1,8 +1,12 @@
 final: prev:
 let
   lib = final.lib;
+  catalog = builtins.fromJSON (builtins.readFile ../catalogs/packages.json);
   isLinux = final.stdenv.hostPlatform.isLinux;
   isDarwin = final.stdenv.hostPlatform.isDarwin;
+  packageFor = name:
+    lib.attrByPath (lib.splitString "." name)
+      (throw "Public package catalog entry is unavailable: ${name}") final;
 
   homeWeaveCli = prev.writeShellApplication {
     name = "home-weave";
@@ -63,28 +67,7 @@ let
 
   neovimPython = final.python3.withPackages (pythonPackages: [ pythonPackages.pynvim ]);
 
-  neovimCorePackages = with final; [
-    clang
-    fd
-    gnumake
-    nodejs
-    neovimPython
-    ripgrep
-    unzip
-  ];
-
-  commonToolPackages =
-    with final;
-    [
-      curl
-      git
-      homeWeaveCli
-      homeWeaveEnv
-      neovim
-      starship
-      stow
-    ]
-    ++ neovimCorePackages;
+  commonToolPackages = map packageFor catalog.base;
 
   shellPackages = with final; {
     bash = bashInteractive;
@@ -111,7 +94,6 @@ in
   inherit
     commonTerminalPackages
     commonToolPackages
-    neovimCorePackages
     neovimPython
     platformTerminalPackages
     shellPackages

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 3,
+  "distribution": {"name": "invalid-fixture"},
+  "defaults": {"profile": "minimal"},
+  "profiles": {
+    "parent": {
+      "extends": null,
+      "dotfiles": ["nvim"],
+      "packages": {"nix": ["jq"]}
+    },
+    "minimal": {
+      "extends": "parent",
+      "exclude": {"packages": {"nix": ["misspelled-package"]}}
+    }
+  }
+}

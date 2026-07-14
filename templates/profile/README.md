@@ -130,10 +130,9 @@ as its target and `--no-folding`. Credentials and secret values must remain in
 local secret stores.
 
 Desktop applications normally do not load interactive shell configuration.
-Give GUI tools such as Claude Desktop an explicit Nix executable path (or a
-small wrapper) and set non-secret selectors such as `AWS_PROFILE` in the app's
-configuration. AWS credentials remain in `~/.aws/credentials`, the AWS SSO
-cache, `aws-vault`, or another approved secret manager—not in profile layers.
+Give GUI tools an explicit Nix executable path or a small wrapper. Keep
+credentials in a local credential store or approved secret manager, not in
+profile layers.
 
 ## Updates
 

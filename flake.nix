@@ -39,7 +39,7 @@
     let
       baseOverlay = import ./overlays/base.nix;
       developmentOverlay = import ./overlays/development.nix;
-      publicPackageCatalog = import ./lib/package-catalog.nix;
+      publicPackageCatalog = builtins.fromJSON (builtins.readFile ./catalogs/packages.json);
       profileConfig = import ./lib/profile-config.nix { lib = nixpkgs.lib; };
       declarativePackages = import ./lib/declarative-packages.nix { lib = nixpkgs.lib; };
       defaultProfileManifest = builtins.fromJSON (builtins.readFile ./templates/profile/home-weave.json);
@@ -277,36 +277,8 @@
           checks = {
             profile-config =
               let
-                fixture = {
-                  schemaVersion = 3;
-                  defaults.profile = "child";
-                  profiles = {
-                    base = {
-                      extends = null;
-                      shells = [ "zsh" ];
-                      primaryShell = "zsh";
-                      dotfiles = [ "common" "nvim" ];
-                      packages.nix = [ "jq" ];
-                      platforms = {
-                        macos.packages = {
-                          nix = [ { name = "claude-code"; allowUnfree = true; } ];
-                          homebrew.formulae = [ "vault" ];
-                          providers.company = [ "approved-app" ];
-                        };
-                        linux.distributions.ubuntu.packages.apt = [ "curl" ];
-                      };
-                    };
-                    child = {
-                      extends = "base";
-                      exclude = {
-                        dotfiles = [ "nvim" ];
-                        packages.nix = [ "jq" ];
-                      };
-                      dotfiles = [ "work-nvim" ];
-                      packages.nix = [ "ripgrep" ];
-                    };
-                  };
-                };
+                fixture = builtins.fromJSON
+                  (builtins.readFile ./tests/fixtures/profile-inheritance.json);
                 darwin = profileConfig.resolve {
                   config = fixture;
                   sourceRoot = ./tests/fixtures;
@@ -321,34 +293,8 @@
                   system = "x86_64-linux";
                   packageCatalog = publicPackageCatalog;
                 };
-                strictDarwinFixture = {
-                  schemaVersion = 3;
-                  defaults.profile = "minimal";
-                  profiles = {
-                    parent = {
-                      extends = null;
-                      packageGroups = [ "cloud" ];
-                      dotfiles = [ "nvim" ];
-                      packages.nix = [ "jq" ];
-                      platforms.macos.packages = {
-                        homebrew = { formulae = [ "vault" ]; casks = [ "example-app" ]; };
-                        providers.enterprise = [ "managed-app" ];
-                      };
-                    };
-                    minimal = {
-                      extends = "parent";
-                      exclude = {
-                        dotfiles = [ "nvim" ];
-                        packageGroups = [ "cloud" ];
-                        packages = {
-                          nix = [ "jq" ];
-                          homebrew = { formulae = [ "vault" ]; casks = [ "example-app" ]; };
-                          providers.enterprise = [ "managed-app" ];
-                        };
-                      };
-                    };
-                  };
-                };
+                strictDarwinFixture = builtins.fromJSON
+                  (builtins.readFile ./tests/fixtures/profile-strict-darwin.json);
                 strictDarwin = profileConfig.resolve {
                   config = strictDarwinFixture;
                   sourceRoot = ./tests/fixtures;
@@ -356,26 +302,8 @@
                   system = "aarch64-darwin";
                   packageCatalog = publicPackageCatalog;
                 };
-                strictLinuxFixture = {
-                  schemaVersion = 3;
-                  defaults.profile = "minimal";
-                  profiles = {
-                    parent = {
-                      extends = null;
-                      platforms.linux.packages = {
-                        apt = [ "curl" ];
-                        pacman = [ "ripgrep" ];
-                      };
-                    };
-                    minimal = {
-                      extends = "parent";
-                      exclude.packages = {
-                        apt = [ "curl" ];
-                        pacman = [ "ripgrep" ];
-                      };
-                    };
-                  };
-                };
+                strictLinuxFixture = builtins.fromJSON
+                  (builtins.readFile ./tests/fixtures/profile-strict-linux.json);
                 strictLinux = profileConfig.resolve {
                   config = strictLinuxFixture;
                   sourceRoot = ./tests/fixtures;
@@ -385,13 +313,8 @@
                 };
                 invalidExclusion = builtins.tryEval (builtins.deepSeq
                   (profileConfig.resolve {
-                    config = strictDarwinFixture // {
-                      profiles = strictDarwinFixture.profiles // {
-                        minimal = strictDarwinFixture.profiles.minimal // {
-                          exclude.packages.nix = [ "misspelled-package" ];
-                        };
-                      };
-                    };
+                    config = builtins.fromJSON
+                      (builtins.readFile ./tests/fixtures/profile-invalid-exclusion.json);
                     sourceRoot = ./tests/fixtures;
                     sourceName = "invalid-fixture";
                     system = "aarch64-darwin";
@@ -420,7 +343,13 @@
                 jq -e . ${./schemas/home-weave-v3.schema.json} >/dev/null
                 check-jsonschema --schemafile ${./schemas/home-weave-v3.schema.json} \
                   ${./templates/profile/home-weave.json} \
-                  ${./templates/distribution/profile-overlay/home-weave.json}
+                  ${./templates/distribution/profile-overlay/home-weave.json} \
+                  ${./tests/fixtures/profile-inheritance.json} \
+                  ${./tests/fixtures/profile-strict-darwin.json} \
+                  ${./tests/fixtures/profile-strict-linux.json} \
+                  ${./tests/fixtures/profile-invalid-exclusion.json}
+                check-jsonschema --schemafile ${./schemas/package-catalog-v1.schema.json} \
+                  ${./catalogs/packages.json}
                 touch $out
               '';
 
@@ -586,13 +515,15 @@
 
             declarative-package-policy =
               let
-                evaluateCatalog = catalog:
+                packageForCatalog = catalog:
                   let candidate = import packageSource {
                     inherit system;
                     overlays = [ (declarativePackages.mkOverlay { inherit catalog; sourceRoot = ./.; }) ];
                     config.allowUnsupportedSystem = true;
                   };
-                  in builtins.tryEval (builtins.deepSeq candidate.policy-test.drvPath true);
+                  in candidate.policy-test;
+                evaluateCatalog = catalog:
+                  builtins.tryEval (builtins.deepSeq (packageForCatalog catalog).drvPath true);
                 badHost = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
@@ -621,10 +552,13 @@
                     kind = "nixpkgs"; attr = "jq"; version = "0.0-invalid";
                   };
                 };
+                extensionlessZip = packageForCatalog
+                  (builtins.fromJSON (builtins.readFile ./tests/fixtures/extensionless-zip.json));
               in
               assert badHost.success == false;
               assert unsupported.success == false;
               assert wrongVersion.success == false;
+              assert nixpkgs.lib.hasSuffix ".zip" extensionlessZip.src.name;
               pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
                 check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
                   ${./tests/fixtures/declarative-packages.json}
@@ -670,6 +604,7 @@
       };
       lib.mkHomeWeaveApp = mkHomeWeaveApp;
       lib.packageCatalog = publicPackageCatalog;
+      lib.packageCatalogSchema = ./schemas/package-catalog-v1.schema.json;
       lib.declarativePackages = declarativePackages;
       lib.declarativePackageSchema = ./schemas/declarative-packages-v1.schema.json;
       lib.mkHomeWeaveDistribution = mkHomeWeaveDistribution;

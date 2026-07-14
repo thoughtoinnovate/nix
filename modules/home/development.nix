@@ -6,7 +6,7 @@
 }:
 let
   cfg = config.homeWeave.development;
-  catalog = import ../../lib/package-catalog.nix;
+  catalog = builtins.fromJSON (builtins.readFile ../../catalogs/packages.json);
 in
 {
   imports = [ ./base.nix ];

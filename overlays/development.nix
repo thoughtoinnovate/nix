@@ -1,6 +1,14 @@
 final: prev:
 let
   lib = final.lib;
+  catalog = builtins.fromJSON (builtins.readFile ../catalogs/packages.json);
+  packageFor = name:
+    if name == "jdk17" then
+      (if final.stdenv.hostPlatform.isLinux then final.corretto17 else final.jdk17)
+    else
+      lib.attrByPath (lib.splitString "." name)
+        (throw "Public package catalog entry is unavailable: ${name}") final;
+  packagesFor = names: map packageFor names;
   pathsToLink = [
     "/bin"
     "/share"
@@ -9,98 +17,11 @@ let
   ++ lib.optionals final.stdenv.hostPlatform.isDarwin [ "/Applications" ];
 in
 {
-  leanDevelopmentPackages = with final; [
-    jq
-    tmux
-    lazygit
-    shellcheck
-    shfmt
-  ];
+  leanDevelopmentPackages = packagesFor catalog.development;
 
-  homeWeavePackageGroups = {
-    python = with final; [
-      python3
-      python3Packages.debugpy
-      black
-      pyright
-      ruff
-    ];
-    data-jupyter = with final; [
-      jupyter
-      python3Packages.notebook
-      python3Packages.ipykernel
-      jupytext
-      python3Packages.pillow
-      python3Packages.cairosvg
-    ];
-    go = with final; [
-      go
-      gopls
-      delve
-      golangci-lint
-    ];
-    rust = with final; [
-      cargo
-      rustc
-      rust-analyzer
-      taplo
-    ];
-    java = with final; [
-      (final.jdkForVersion 17)
-      gradle
-      jdt-language-server
-      google-java-format
-    ];
-    web = with final; [
-      eslint
-      prettier
-      typescript-language-server
-      yaml-language-server
-      marksman
-      markdownlint-cli2
-      vscode-langservers-extracted
-      vscode-js-debug
-    ];
-    cloud = with final; [
-      awscli2
-      terraform
-      kubectl
-      minikube
-    ];
-    desktop = with final; [ vscode ];
-  };
+  homeWeavePackageGroups = lib.mapAttrs (_: names: packagesFor names) catalog.groups;
 
-  neovimDevelopmentPackages = with final; [
-    bash-language-server
-    black
-    cargo
-    delve
-    eslint
-    go
-    google-java-format
-    golangci-lint
-    gopls
-    imagemagick
-    jdt-language-server
-    jupyter
-    lua-language-server
-    markdownlint-cli2
-    marksman
-    prettier
-    pyright
-    ruff
-    rust-analyzer
-    rustc
-    shellcheck
-    shfmt
-    sqlfluff
-    stylua
-    taplo
-    typescript-language-server
-    vscode-js-debug
-    vscode-langservers-extracted
-    yaml-language-server
-  ];
+  neovimDevelopmentPackages = packagesFor catalog.bundles."neovim-development";
 
   jdkForVersion =
     jdkVersion:

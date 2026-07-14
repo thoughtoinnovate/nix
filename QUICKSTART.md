@@ -236,8 +236,8 @@ component name, and everything below it is the final path relative to `$HOME`:
 ```text
 dotfiles/custom/.config/git/config  -> ~/.config/git/config
 dotfiles/custom/.config/nvim/init.lua -> ~/.config/nvim/init.lua
-dotfiles/custom/.aws/config        -> ~/.aws/config
-dotfiles/custom/.aws_functions     -> ~/.aws_functions
+dotfiles/custom/.local/share/example/data.json -> ~/.local/share/example/data.json
+dotfiles/custom/.example-config    -> ~/.example-config
 ```
 
 Select the component with `"dotfiles": ["custom"]`. Edit the source under the
