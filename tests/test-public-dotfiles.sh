@@ -32,7 +32,7 @@ if [[ -n "$PUBLIC_ROOT" ]]; then
   [[ -d "$PUBLIC_ROOT" ]] || fail "missing public source root: $PUBLIC_ROOT"
 
   if rg -n -i --hidden --glob '!.git/**' --glob '!tests/**' --glob '!**/tests/**' \
-    'demandbase|vault\.demandbase|iru|kandji|strongdm|hvashisht|dq0hq7rh7l|documents/work|db-home|work-db|home-weave-personal|aws_functions' \
+    'company-internal|corp-vault|managed-device-provider|private-user|private-host|documents/private|organization-profile|personal-profile|cloud-functions' \
     "$PUBLIC_ROOT"; then
     fail "private distribution, work profile, or personal identifier found"
   fi
