@@ -1177,6 +1177,7 @@ write_profile_provider_packages() {
 
 select_provider_packages() {
   local provider provider_name command catalog inventory selected_groups selected_items selected_ids group rows item_rows
+  local id label state platform config effective_ids
   local selected_group_ids='[]' selected_item_ids='[]' final_ids='[]'
   [[ -t 0 ]] || return 0
   while IFS= read -r provider; do
@@ -1248,8 +1249,36 @@ select_provider_packages() {
     if (($(jq 'length' <<<"$final_ids") > 0)); then
       write_profile_provider_packages "$provider_name" "$final_ids"
       printf 'Selected %s application(s) from %s.\n' "$(jq 'length' <<<"$final_ids")" "$provider_name"
+      effective_ids="$final_ids"
     else
-      printf 'No applications selected from %s.\n' "$provider_name"
+      platform=linux
+      [[ "$(uname -s)" != Darwin ]] || platform=macos
+      config="$ROOT/home-weave.json"
+      effective_ids="$(jq -c --arg profile "$PROFILE" --arg platform "$platform" \
+        --arg provider "$provider_name" '
+          .profiles[$profile].platforms[$platform].packages.providers[$provider] // []
+        ' "$config")"
+      if (($(jq 'length' <<<"$effective_ids") > 0)); then
+        printf 'No new selection from %s; retaining %s application(s) already configured by profile %s.\n' \
+          "$provider_name" "$(jq 'length' <<<"$effective_ids")" "$PROFILE"
+      else
+        printf 'No applications selected from %s; this optional provider will be skipped.\n' "$provider_name"
+      fi
+    fi
+
+    if (($(jq 'length' <<<"$effective_ids") > 0)); then
+      printf 'Configured applications from %s:\n' "$provider_name"
+      while IFS= read -r id; do
+        label="$(jq -r --arg id "$id" '.items[] | select(.id == $id) | .name // .id' <<<"$catalog")"
+        [[ -n "$label" ]] || label="$id"
+        if jq -e --arg id "$id" '.items[] | select(.id == $id and .installed == true)' \
+          >/dev/null <<<"$inventory"; then
+          state='already installed'
+        else
+          state='missing; plan/apply will request installation'
+        fi
+        printf '  %-28s %s\n' "$label" "$state"
+      done < <(jq -r '.[]' <<<"$effective_ids")
     fi
   done < <(jq -c '.[]' <<<"$EXTENSIONS_JSON")
 }

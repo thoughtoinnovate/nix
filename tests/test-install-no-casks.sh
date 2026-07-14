@@ -40,6 +40,14 @@ grep -Fq 'packageOrigins = builtins.fromJSON' "$installer" || {
   printf 'inventory does not preserve resolved package origins\n' >&2
   exit 1
 }
+grep -Fq 'nix-base.lib.homeWeave.sourcesBySystem.\${system}' "$installer" || {
+  printf 'generated activation does not use the stable distribution source API\n' >&2
+  exit 1
+}
+if grep -Eq 'nix-base\.inputs\.(home-manager|home-manager-x86-darwin)' "$installer"; then
+  printf 'generated activation assumes Home Manager is a direct parent input\n' >&2
+  exit 1
+fi
 grep -Fq 'inherit (details) group inheritedFrom sourceProfile origins' "$installer" || {
   printf 'inventory omits resolved inheritance metadata\n' >&2
   exit 1

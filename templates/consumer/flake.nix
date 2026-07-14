@@ -17,11 +17,12 @@
       # Change these values for the target user and machine.
       system = "x86_64-linux";
       username = "change-me";
-      home-manager = nix-base.inputs.home-manager;
+      sources = nix-base.lib.homeWeave.sourcesBySystem.${system};
+      home-manager = sources.homeManager;
     in
     {
       homeConfigurations.${username} = home-manager.lib.homeManagerConfiguration {
-        pkgs = import nixpkgs {
+        pkgs = import sources.nixpkgs {
           inherit system;
           overlays = [
             nix-base.overlays.base

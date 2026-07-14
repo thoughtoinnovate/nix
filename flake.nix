@@ -673,6 +673,19 @@
       lib.declarativePackages = declarativePackages;
       lib.declarativePackageSchema = ./schemas/declarative-packages-v1.schema.json;
       lib.mkHomeWeaveDistribution = mkHomeWeaveDistribution;
+      lib.homeWeave = {
+        schemaVersion = 1;
+        sourcesBySystem = nixpkgs.lib.genAttrs
+          [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
+          (system: {
+            nixpkgs = if system == "x86_64-darwin"
+              then inputs.nixpkgs-x86-darwin
+              else inputs.nixpkgs;
+            homeManager = if system == "x86_64-darwin"
+              then inputs.home-manager-x86-darwin
+              else inputs.home-manager;
+          });
+      };
 
       templates.default = {
         path = ./templates/consumer;

@@ -420,10 +420,10 @@ $MARKER
     let
       system = "$SYSTEM";
       username = "$USER";
-      packageSource = if system == "x86_64-darwin" then nix-base.inputs.nixpkgs-x86-darwin else nixpkgs;
-      home-manager = if system == "x86_64-darwin"
-        then nix-base.inputs.home-manager-x86-darwin
-        else nix-base.inputs.home-manager;
+      sources = nix-base.lib.homeWeave.sourcesBySystem.\${system} or
+        (throw "HomeWeave distribution does not expose activation sources for \${system}");
+      packageSource = sources.nixpkgs;
+      home-manager = sources.homeManager;
       packageLib = packageSource.lib;
       pkgs = import packageSource {
         inherit system;
