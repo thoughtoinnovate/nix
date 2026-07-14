@@ -5,6 +5,8 @@
 !.env.example
 .secrets
 .secrets.*
+.home_weave_secrets
+.home_weave_secrets.*
 result
 result-*
 

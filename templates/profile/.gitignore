@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.home_weave_secrets
+.home_weave_secrets.*
 *.key
 *.p12
 *.pem

@@ -7,14 +7,14 @@ COMPOSER="${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/compose-dotf
 TEST_ROOT="$(mktemp -d)"
 TEST_HOME="$TEST_ROOT/home"
 TEST_DATA="$TEST_ROOT/data"
-WORK="$TEST_ROOT/work"
+COMPONENTS="$TEST_ROOT/components"
 JSON_FILE="$TEST_ROOT/layers.json"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
-mkdir -p "$TEST_HOME" "$WORK/db-aws/.config/company" "$WORK/custom/.config/personal"
-printf 'work\n' >"$WORK/db-aws/.config/company/work.conf"
-printf 'personal\n' >"$WORK/custom/.config/personal/config"
-touch "$WORK/custom/.gitkeep"
+mkdir -p "$TEST_HOME" "$COMPONENTS/organization/.config/example-org" "$COMPONENTS/custom/.config/personal"
+printf 'organization\n' >"$COMPONENTS/organization/.config/example-org/settings.conf"
+printf 'personal\n' >"$COMPONENTS/custom/.config/personal/config"
+touch "$COMPONENTS/custom/.gitkeep"
 
 run_composer() {
   HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_DATA" \
@@ -36,11 +36,11 @@ expect_failure() {
 }
 
 write_layers() {
-  jq -n --arg base "$BASE_DOTFILES" --arg work "$WORK" '{layers: [
+  jq -n --arg base "$BASE_DOTFILES" --arg extensions "$COMPONENTS" '{layers: [
     {name: "core", source: {kind: "path", path: $base},
       packages: ["common", "starship", "ghostty", "nvim", "@shells"]},
-    {name: "work", source: {kind: "path", path: $work}, packages: ["db-aws"]},
-    {name: "personal", source: {kind: "path", path: $work}, packages: ["custom"]}
+    {name: "organization", source: {kind: "path", path: $extensions}, packages: ["organization"]},
+    {name: "personal", source: {kind: "path", path: $extensions}, packages: ["custom"]}
   ]}' >"$JSON_FILE"
 }
 
@@ -50,7 +50,7 @@ run_composer zsh zsh,fish
 [[ -L "$TEST_HOME/.config/fish/config.fish" ]]
 [[ -L "$TEST_HOME/.config/nvim/init.lua" ]]
 [[ -L "$TEST_HOME/.config/starship.toml" ]]
-grep -Fqx work "$TEST_HOME/.config/company/work.conf"
+grep -Fqx organization "$TEST_HOME/.config/example-org/settings.conf"
 grep -Fqx personal "$TEST_HOME/.config/personal/config"
 [[ ! -e "$TEST_HOME/.gitkeep" ]]
 
@@ -59,7 +59,7 @@ jq 'del(.layers[2])' "$JSON_FILE" >"$JSON_FILE.next"
 mv "$JSON_FILE.next" "$JSON_FILE"
 run_composer zsh zsh,fish
 [[ ! -e "$TEST_HOME/.config/personal/config" ]]
-[[ -e "$TEST_HOME/.config/company/work.conf" ]]
+[[ -e "$TEST_HOME/.config/example-org/settings.conf" ]]
 
 # Exact links into a deleted HomeWeave generation are safely reclaimed.
 STALE_HOME="$TEST_ROOT/stale-home"
@@ -92,9 +92,9 @@ expect_failure 'package is missing' env HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_D
 
 # Existing unmanaged destinations are rejected without replacing the current generation.
 printf 'unmanaged\n' >"$TEST_HOME/.config/new-conflict"
-mkdir -p "$WORK/conflict/.config"
-printf 'managed\n' >"$WORK/conflict/.config/new-conflict"
-jq --arg work "$WORK" '.layers += [{name: "conflict", source: {kind: "path", path: $work}, packages: ["conflict"]}]' \
+mkdir -p "$COMPONENTS/conflict/.config"
+printf 'managed\n' >"$COMPONENTS/conflict/.config/new-conflict"
+jq --arg components "$COMPONENTS" '.layers += [{name: "conflict", source: {kind: "path", path: $components}, packages: ["conflict"]}]' \
   "$JSON_FILE" >"$JSON_FILE.invalid"
 expect_failure 'destination conflict' env HOME="$TEST_HOME" XDG_DATA_HOME="$TEST_DATA" \
   bash "$COMPOSER" --shell zsh --namespace home-weave --json "$JSON_FILE.invalid"

@@ -264,6 +264,14 @@ provider approval token before `apply`. It never pipes network content to a
 shell. Distributions can consume `lib.verifiedInstaller.program` or the
 `home-weave-verified-installer` package from this flake.
 
+The same framework accepts declarative `macos-dmg-app` catalog entries for
+vendor applications published through a checksum manifest. The generic
+provider verifies the selected artifact hash and configured Apple Team ID,
+installs only to a reviewed per-user destination, and reports the application
+through the normal provider receipt lifecycle. Product URLs, selectors, paths,
+and publisher identities remain catalog data; product-specific shell handlers
+are not required.
+
 GUI applications launched from Finder, Spotlight, or a desktop menu generally
 do not source interactive shell files. Configure those applications with an
 explicit Nix executable path or wrapper instead of relying on `.zshrc` or an
