@@ -264,7 +264,20 @@ Common modes:
 ~/.home-weave/home-weave uninstall --nuke
 ```
 
-No uninstall mode removes Nix or performs global Nix store garbage collection.
+For a complete fresh reset, preview and then run the same command without
+`--dry-run`:
+
+```sh
+~/.home-weave/home-weave uninstall --nuke --dry-run
+~/.home-weave/home-weave uninstall --nuke
+```
+
+Nuke removes the proven Home Manager environment, the active Stow generation,
+dangling links owned by that root, recorded removable applications, restored
+adoption backups, receipts, generated state, and the HomeWeave root. It retains
+Nix, shared store paths, unrelated links and packages, and applications whose
+provider retains lifecycle ownership. No uninstall mode performs global Nix
+store garbage collection.
 
 ## If something goes wrong
 

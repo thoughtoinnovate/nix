@@ -1896,6 +1896,82 @@ restore_adopted_backups() {
   return 0
 }
 
+normalize_absolute_path() {
+  local path="$1" segment normalized=""
+  local parts=()
+  [[ "$path" == /* ]] || return 1
+  while IFS= read -r segment; do
+    case "$segment" in
+      ""|.) ;;
+      ..)
+        ((${#parts[@]} > 0)) || return 1
+        parts=("${parts[@]:0:${#parts[@]}-1}")
+        ;;
+      *) parts+=("$segment") ;;
+    esac
+  done < <(tr '/' '\n' <<<"$path")
+  for segment in "${parts[@]}"; do
+    normalized="$normalized/$segment"
+  done
+  printf '%s\n' "${normalized:-/}"
+}
+
+is_stale_dotfile_link_owned_by_root() {
+  local link="$1" raw candidate managed_root
+  [[ -L "$link" && ! -e "$link" ]] || return 1
+  [[ "$link" != "$ROOT" && "$link" != "$ROOT/"* ]] || return 1
+  raw="$(readlink "$link")" || return 1
+  if [[ "$raw" == /* ]]; then
+    candidate="$raw"
+  else
+    candidate="$(dirname "$link")/$raw"
+  fi
+  candidate="$(normalize_absolute_path "$candidate")" || return 1
+  managed_root="$(normalize_absolute_path "$ROOT/.state/dotfiles/current")" || return 1
+  [[ "$candidate" == "$managed_root" || "$candidate" == "$managed_root/"* ]]
+}
+
+collect_stale_dotfile_links() {
+  local link
+  while IFS= read -r -d '' link; do
+    is_stale_dotfile_link_owned_by_root "$link" || continue
+    printf '%s\0' "$link"
+  done < <(find "$HOME" -type l -print0 2>/dev/null)
+}
+
+cleanup_stale_dotfile_links() {
+  local link
+  local stale_links=()
+  while IFS= read -r -d '' link; do
+    stale_links+=("$link")
+  done < <(collect_stale_dotfile_links)
+
+  if ((${#stale_links[@]} == 0)); then
+    printf 'No dangling links owned by %s were found.\n' "$ROOT"
+    return 0
+  fi
+
+  printf 'Dangling links owned by %s:\n' "$ROOT"
+  for link in "${stale_links[@]}"; do
+    printf '  %s -> %s\n' "$link" "$(readlink "$link")"
+  done
+
+  if "$DRY_RUN"; then
+    printf 'Would remove %d dangling HomeWeave-owned link(s).\n' "${#stale_links[@]}"
+    return 0
+  fi
+  for link in "${stale_links[@]}"; do
+    # Recheck ownership immediately before removal so a link changed during
+    # the confirmation window is never deleted.
+    if is_stale_dotfile_link_owned_by_root "$link"; then
+      rm "$link"
+    else
+      warn "link changed during cleanup and was retained: $link"
+    fi
+  done
+  printf 'Removed %d dangling HomeWeave-owned link(s).\n' "${#stale_links[@]}"
+}
+
 uninstall_home_manager() {
   local generated="$ROOT/.state/generated" receipt="" receipt_generation="" current_generation=""
   local has_marker=false has_matching_receipt=false
@@ -2031,6 +2107,7 @@ uninstall_command() {
   fi
   "$UNINSTALL_KEEP_HOME_MANAGER" || uninstall_home_manager
   "$UNINSTALL_KEEP_DOTFILES" || uninstall_dotfiles
+  "$UNINSTALL_KEEP_DOTFILES" || cleanup_stale_dotfile_links
   "$UNINSTALL_NO_RESTORE" || restore_adopted_backups
   "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_casks
   "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_providers

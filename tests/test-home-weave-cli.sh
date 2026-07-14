@@ -235,10 +235,22 @@ test ! -e "$TEST_HOME/.home-weave-managed"
 grep -Fq restored "$TEST_HOME/.home-weave-restored"
 test -d "$ROOT"
 
+# Uninstall automatically removes dangling links whose normalized targets
+# belong to this HomeWeave root. It supports both absolute and relative Stow
+# links and retains unrelated broken links.
+mkdir -p "$TEST_HOME/.config"
+ln -s "$ROOT/.state/dotfiles/current/.config/stale-absolute" \
+  "$TEST_HOME/.config/stale-absolute"
+ln -s "../.home-weave/.state/dotfiles/current/.config/stale-relative" \
+  "$TEST_HOME/.config/stale-relative"
+ln -s "/missing/not-homeweave" "$TEST_HOME/.config/unrelated-broken"
+
 run_cli uninstall --profile development --dry-run | grep -Fq 'inactive'
 touch "$ROOT/.state/home-manager-pending"
 pending_uninstall_output="$(run_cli uninstall --all --dry-run --yes)"
 grep -Fq 'Home Manager will remove its managed packages' <<<"$pending_uninstall_output"
+grep -Fq 'Would remove 2 dangling HomeWeave-owned link(s).' <<<"$pending_uninstall_output"
+test -L "$TEST_HOME/.config/stale-absolute"
 rm -f "$ROOT/.state/home-manager-pending"
 
 # Generated runtime state is intentionally ignored by Git. Uninstall must use
@@ -264,6 +276,9 @@ receipt_uninstall_output="$(PATH="$TEST_ROOT/uninstall-bin:$PATH" run_cli uninst
 grep -Fq 'recovering the missing uninstall marker' <<<"$receipt_uninstall_output"
 grep -Fq "run path:$ROOT/.state/generated#home-manager -- uninstall" "$UNINSTALL_NIX_LOG"
 test ! -e "$ROOT/.state/home-manager-pending"
+test ! -L "$TEST_HOME/.config/stale-absolute"
+test ! -L "$TEST_HOME/.config/stale-relative"
+test -L "$TEST_HOME/.config/unrelated-broken"
 
 dry_run_output="$(run_cli uninstall --all --dry-run --yes)"
 grep -Fq 'Repository retained' <<<"$dry_run_output"

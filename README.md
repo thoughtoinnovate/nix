@@ -171,7 +171,10 @@ the active HomeWeave Stow generation, restore missing pre-adoption files,
 and remove only applications proven by HomeWeave receipts. Normal and `--all`
 keep the repository; `--nuke` requires typed confirmation and removes only the
 HomeWeave root. No mode removes Nix or runs global garbage collection. Every
-mode supports `--dry-run`.
+mode supports `--dry-run`. Uninstall also removes dangling symlinks whose
+normalized targets belong to the selected root's `.state/dotfiles/current`;
+active and unrelated links are retained. Use `uninstall --nuke --dry-run` to
+preview a complete reset and `uninstall --nuke` to perform it.
 
 ## Create a personal or work profile
 
