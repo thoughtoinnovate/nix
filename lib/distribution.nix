@@ -50,7 +50,16 @@ let
     in lib.optional (spec.allowUnfree or false) (spec.unfreeName or spec.attr or name)
   ) (builtins.attrNames (declarativeCatalog.packages or { })));
   effectiveLocalOverlays = declarativeOverlay ++ localOverlays;
-  localOverlay = lib.composeManyExtensions effectiveLocalOverlays;
+  # Consumers import a distribution's exported default overlay when creating
+  # their Home Manager package set. A child distribution must therefore export
+  # the same parent + child overlay composition used by its internal activation
+  # checks; exporting only the child overlay makes inherited declarative package
+  # names resolve in profile metadata but disappear during real activation.
+  activationOverlays =
+    lib.optional (inheritParentOverlay && parent ? overlays && parent.overlays ? default)
+      parent.overlays.default
+    ++ effectiveLocalOverlays;
+  activationOverlay = lib.composeManyExtensions activationOverlays;
   parentProfilesFor = system:
     if parent ? lib && parent.lib ? setup && parent.lib.setup ? profilesBySystem
       && builtins.hasAttr system parent.lib.setup.profilesBySystem
@@ -77,8 +86,7 @@ let
     import (packageSourceFor system) {
       inherit system;
       overlays = [ core.overlays.darwin-cache core.overlays.base core.overlays.development ]
-        ++ lib.optional (inheritParentOverlay && parent ? overlays && parent.overlays ? default) parent.overlays.default
-        ++ effectiveLocalOverlays;
+        ++ activationOverlays;
       config.allowUnfreePredicate = package:
         builtins.elem (lib.getName package) profile.allowUnfree;
       config.allowUnsupportedSystem = true;
@@ -147,6 +155,7 @@ let
       // extraPackagesForSystem system pkgs);
   checks = lib.genAttrs systems (system:
     let
+      packageSource = packageSourceFor system;
       pkgs = appPkgsFor system;
       selectedHomeManager = if system == "x86_64-darwin" then home-manager-x86-darwin else home-manager;
       profileDerivations = map (name:
@@ -173,8 +182,31 @@ let
       evaluationCheck = builtins.deepSeq profileDerivations (pkgs.runCommand "home-weave-profile-evaluation" { } ''
         touch $out
       '');
+      # Generated consumer flakes import the distribution's exported default
+      # overlay rather than calling activationPkgsFor. Resolve every declared
+      # package through that public interface so inherited-overlay regressions
+      # fail `flake check` before reaching a user's machine.
+      consumerPackages = import packageSource {
+        inherit system;
+        overlays = [ core.overlays.darwin-cache core.overlays.base core.overlays.development
+          self.overlays.default ];
+        config.allowUnfreePredicate = package:
+          lib.any (profile: builtins.elem (lib.getName package) profile.allowUnfree)
+            (builtins.attrValues resolvedBySystem.${system}.profiles);
+        config.allowUnsupportedSystem = true;
+      };
+      consumerPackagePaths = lib.concatMap (profile:
+        map (name: toString (lib.attrByPath (lib.splitString "." name)
+          (throw "Exported HomeWeave overlay is missing package: ${name}")
+          consumerPackages)) profile.nixPackages
+      ) (builtins.attrValues resolvedBySystem.${system}.profiles);
+      consumerOverlayCheck = builtins.deepSeq consumerPackagePaths
+        (pkgs.runCommand "home-weave-consumer-overlay-evaluation" { } ''
+          touch $out
+        '');
     in {
       profile-evaluation = evaluationCheck;
+      consumer-overlay-evaluation = consumerOverlayCheck;
       configuration-schema = pkgs.runCommand "home-weave-configuration-schema" {
         nativeBuildInputs = [ pkgs.check-jsonschema ];
       } ''
@@ -187,7 +219,7 @@ let
     } // extraChecksForSystem system pkgs);
 in
 {
-  overlays = (parent.overlays or core.overlays) // { default = localOverlay; };
+  overlays = (parent.overlays or core.overlays) // { default = activationOverlay; };
   homeModules = (parent.homeModules or core.homeModules) // {
     profiles = profileModulesBySystem.${representativeSystem}.profiles;
   };
