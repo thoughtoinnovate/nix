@@ -92,6 +92,11 @@ in
           gzipOutput =
             if (install.files or [ ]) == [ ] then id
             else (builtins.head install.files).source;
+          rawOutput =
+            let files = install.files or [ ];
+            in require (installKind == "executables" && builtins.length files == 1)
+              "Declarative raw package ${id} requires exactly one executable file"
+              (builtins.head files).source;
           runProgram = require (safeRelativePath (install.program or ""))
             "Declarative package ${id} has an unsafe installer program" (install.program or "");
           runArgs = lib.concatStringsSep " " (map renderRunArg (install.args or [ ]));
@@ -133,11 +138,18 @@ in
             nativeBuildInputs = lib.optionals (format == "zip") [ prev.unzip ]
               ++ lib.optionals (format == "gzip") [ prev.gzip ];
             dontUnpack = format == "raw" || format == "gzip";
-            preInstall = lib.optionalString (format == "gzip") ''
-              mkdir -p source
-              gzip -dc "$src" > ${lib.escapeShellArg "source/${gzipOutput}"}
-              cd source
-            '';
+            preInstall =
+              if format == "gzip" then ''
+                mkdir -p source
+                gzip -dc "$src" > ${lib.escapeShellArg "source/${gzipOutput}"}
+                cd source
+              ''
+              else if format == "raw" then ''
+                mkdir -p ${lib.escapeShellArg "source/${builtins.dirOf rawOutput}"}
+                cp "$src" ${lib.escapeShellArg "source/${rawOutput}"}
+                cd source
+              ''
+              else "";
             meta = commonMeta;
           } // lib.optionalAttrs (sourceRootValue != null) { sourceRoot = sourceRootValue; })
         else if kind == "bundle" then

@@ -554,11 +554,27 @@
                 };
                 extensionlessZip = packageForCatalog
                   (builtins.fromJSON (builtins.readFile ./tests/fixtures/extensionless-zip.json));
+                rawExecutable = packageForCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    platforms.${system} = {
+                      url = "https://official.invalid/tool";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      format = "raw";
+                      install = {
+                        kind = "executables";
+                        files = [ { source = "tool"; target = "bin/tool"; } ];
+                      };
+                    };
+                  };
+                };
               in
               assert badHost.success == false;
               assert unsupported.success == false;
               assert wrongVersion.success == false;
               assert nixpkgs.lib.hasSuffix ".zip" extensionlessZip.src.name;
+              assert nixpkgs.lib.hasInfix "cp \"$src\" source/tool" rawExecutable.preInstall;
               pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
                 check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
                   ${./tests/fixtures/declarative-packages.json}
