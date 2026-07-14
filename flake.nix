@@ -489,7 +489,7 @@
             install-no-casks =
               pkgs.runCommand "install-no-casks-tests"
                 {
-                  nativeBuildInputs = [ pkgs.gnused ];
+                  nativeBuildInputs = with pkgs; [ coreutils gnused rsync ];
                 }
                 ''
                   bash ${./tests/test-install-no-casks.sh} ${./install.sh} ${./flake.nix}
