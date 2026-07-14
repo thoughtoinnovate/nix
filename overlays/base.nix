@@ -31,7 +31,7 @@ let
       export HOME_WEAVE_NATIVE_PROVIDER="''${HOME_WEAVE_NATIVE_PROVIDER:-${../lib/native-provider.sh}}"
       export HOME_WEAVE_PREFLIGHT_REPORTER="''${HOME_WEAVE_PREFLIGHT_REPORTER:-${../lib/preflight-report.sh}}"
       export HOME_WEAVE_ENV_RENDERER="''${HOME_WEAVE_ENV_RENDERER:-${../lib/home-weave-env.sh}}"
-      export HOME_WEAVE_CONFIG_SCHEMA="''${HOME_WEAVE_CONFIG_SCHEMA:-${../schemas/home-weave-v2.schema.json}}"
+      export HOME_WEAVE_CONFIG_SCHEMA="''${HOME_WEAVE_CONFIG_SCHEMA:-${../schemas/home-weave-v3.schema.json}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
     '';
   };

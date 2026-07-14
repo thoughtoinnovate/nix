@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "example-tool": {
+      "kind": "archive",
+      "version": "1.0.0",
+      "officialHosts": ["downloads.example.invalid"],
+      "platforms": {
+        "aarch64-darwin": {
+          "url": "https://downloads.example.invalid/example-tool.tar.gz",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "install": {
+            "kind": "executables",
+            "files": [{"source": "example-tool", "target": "bin/example-tool"}]
+          }
+        }
+      },
+      "meta": {
+        "description": "Schema-only package fixture",
+        "homepage": "https://example.invalid/",
+        "license": "licenses.mit",
+        "mainProgram": "example-tool"
+      }
+    }
+  }
+}

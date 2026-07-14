@@ -19,7 +19,7 @@ PACKAGE_PREVIEW="${HOME_WEAVE_PACKAGE_PREVIEW:-$(cd "$(dirname "${BASH_SOURCE[0]
 PUBLISHER_REGISTRY="${HOME_WEAVE_PUBLISHER_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/reviewed-publishers.json}"
 PUBLISHER_FILTER="${HOME_WEAVE_PUBLISHER_FILTER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/verify-publishers.jq}"
 ENV_RENDERER="${HOME_WEAVE_ENV_RENDERER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/home-weave-env.sh}"
-CONFIG_SCHEMA="${HOME_WEAVE_CONFIG_SCHEMA:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/schemas/home-weave-v2.schema.json}"
+CONFIG_SCHEMA="${HOME_WEAVE_CONFIG_SCHEMA:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/schemas/home-weave-v3.schema.json}"
 EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[] }"
 ASSUME_YES=false
 APPLY_NOW=""
@@ -560,7 +560,7 @@ ensure_profile() {
     || fail "parent profile does not exist: $EXTENDS"
   temporary="$file.tmp.$$"
   jq --arg profile "$PROFILE" --arg parent "$EXTENDS" \
-    '.profiles[$profile] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], packages: {nix: []}}' \
+    '.profiles[$profile] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], exclude: {}, packages: {nix: []}}' \
     "$file" >"$temporary"
   mv "$temporary" "$file"
 }
@@ -871,26 +871,13 @@ enrich_nixpkgs_results() {
 }
 
 load_default_package_ids() {
-  local catalog profiles profile_metadata development
-  catalog="$(nix --extra-experimental-features 'nix-command flakes' \
-    eval --json "$BASE_URL#lib.packageCatalog" 2>/dev/null || printf '{}')"
+  local profiles profile_metadata
   profiles="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "path:$ROOT#lib.setup.profilesBySystem.\"$(current_nix_system)\"" 2>/dev/null || printf '{}')"
   profile_metadata="$(jq -c --arg profile "$PROFILE" '.[$profile] // {}' <<<"$profiles")"
-  development="$(jq -r '.development // false' <<<"$profile_metadata")"
   DEFAULT_PACKAGE_IDS="$(jq -rn \
-    --argjson catalog "$catalog" \
-    --argjson profile "$profile_metadata" \
-    --arg development "$development" '
-      (
-        ($catalog.base // [])
-        + (if $development == "true" then ($catalog.development // []) else [] end)
-        + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
-        + ($profile.shells // [])
-        + ($profile.nixPackages // [])
-      )
-      | unique[]
-    ')"
+    --argjson profile "$profile_metadata" '
+      (($profile.shells // []) + ($profile.nixPackages // [])) | unique[]')"
 }
 
 preview_final_package_selection() {
@@ -1137,8 +1124,10 @@ load_builtin_provider() {
   if [[ -n "${HOME_WEAVE_NATIVE_PROVIDER:-}" && -x "$HOME_WEAVE_NATIVE_PROVIDER" ]] \
     && ! jq -e 'any(.[]; .name == "native-official")' >/dev/null <<<"$EXTENSIONS_JSON"; then
     EXTENSIONS_JSON="$(jq -cn --argjson extensions "$EXTENSIONS_JSON" --arg executable "$HOME_WEAVE_NATIVE_PROVIDER" '
-      $extensions + [{schemaVersion: 1, name: "native-official", executable: $executable,
-        capabilities: ["inventory", "search", "install", "update", "remove", "status"]}]')"
+      $extensions + [{schemaVersion: 2, name: "native-official", executable: $executable,
+        capabilities: ["inventory", "search", "install", "update", "remove", "status"],
+        removalPolicy: "remove",
+        platforms: ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]}]')"
   fi
 }
 
@@ -1146,7 +1135,10 @@ show_provider_inventory() {
   local provider command output
   jq -e 'type == "array"' >/dev/null <<<"$EXTENSIONS_JSON" || fail "invalid extension manifest"
   while IFS= read -r provider; do
-    jq -e '.schemaVersion == 1 and (.name | type == "string") and (.executable | type == "string")' \
+    jq -e '.schemaVersion == 2 and (.name | type == "string") and
+      (.executable | type == "string") and (.capabilities | type == "array") and
+      ((.removalPolicy == "remove") or (.removalPolicy == "retain")) and
+      (.platforms | type == "array")' \
       >/dev/null <<<"$provider" || { warn "ignored an invalid software provider"; continue; }
     jq -e '.capabilities | index("inventory")' >/dev/null <<<"$provider" || continue
     command="$(jq -r '.executable' <<<"$provider")"
@@ -1161,6 +1153,103 @@ show_provider_inventory() {
         <<<"$output"
     else
       warn "provider inventory failed: $(jq -r '.name' <<<"$provider")"
+    fi
+  done < <(jq -c '.[]' <<<"$EXTENSIONS_JSON")
+}
+
+write_profile_provider_packages() {
+  local provider="$1" packages_json="$2" platform temporary config="$ROOT/home-weave.json"
+  [[ "$provider" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider name: $provider"
+  platform=linux
+  [[ "$(uname -s)" != Darwin ]] || platform=macos
+  temporary="$config.tmp.$$"
+  jq --arg profile "$PROFILE" --arg platform "$platform" --arg provider "$provider" \
+    --argjson packages "$packages_json" '
+      .profiles[$profile].platforms = (.profiles[$profile].platforms // {})
+      | .profiles[$profile].platforms[$platform] = (.profiles[$profile].platforms[$platform] // {})
+      | .profiles[$profile].platforms[$platform].packages = (.profiles[$profile].platforms[$platform].packages // {})
+      | .profiles[$profile].platforms[$platform].packages.providers =
+          (.profiles[$profile].platforms[$platform].packages.providers // {})
+      | .profiles[$profile].platforms[$platform].packages.providers[$provider] = $packages
+    ' "$config" >"$temporary"
+  mv "$temporary" "$config"
+}
+
+select_provider_packages() {
+  local provider provider_name command catalog inventory selected_groups selected_items selected_ids group rows item_rows
+  local selected_group_ids='[]' selected_item_ids='[]' final_ids='[]'
+  [[ -t 0 ]] || return 0
+  while IFS= read -r provider; do
+    jq -e '.schemaVersion == 2 and (.capabilities | index("catalog"))' >/dev/null <<<"$provider" || continue
+    provider_name="$(jq -r '.name' <<<"$provider")"
+    command="$(jq -r '.executable' <<<"$provider")"
+    [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
+    catalog="$($command catalog)" || fail "provider catalog failed: $provider_name"
+    inventory="$($command inventory)" || fail "provider inventory failed: $provider_name"
+    jq -e '.schemaVersion == 1 and (.groups | type == "array") and (.items | type == "array")' \
+      >/dev/null <<<"$catalog" || fail "provider $provider_name returned an invalid selectable catalog"
+    jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$inventory" \
+      || fail "provider $provider_name returned invalid inventory"
+
+    printf '\nOptional applications from provider %s (select none to skip):\n' "$provider_name"
+    rows="$(jq -r --argjson inventory "$inventory" '
+      .groups[] as $group
+      | ([.items[] | select(.group == $group.id)] | length) as $total
+      | ([.items[] | select(.group == $group.id) | .id] as $ids
+        | [$inventory.items[] | select(.installed == true and (.id as $id | $ids | index($id)))] | length) as $installed
+      | [$group.id, ($group.name // $group.id), ($installed|tostring), ($total|tostring)] | @tsv
+    ' <<<"$catalog")"
+    if [[ -n "$rows" ]]; then
+      printf 'Application groups:\n'
+      while IFS=$'\t' read -r group label installed total; do
+        printf '  %-16s %-24s %s/%s installed\n' "$group" "$label" "$installed" "$total"
+      done <<<"$rows"
+      if command -v gum >/dev/null 2>&1; then
+        selected_groups="$(printf '%s\n' "$rows" | gum choose --no-limit --height=12 \
+          --header='Provider groups: SPACE select/unselect • ENTER confirm • select none to skip' || true)"
+      else
+        printf 'Group IDs, comma separated, or Enter to skip groups: '
+        read -r selected_groups
+        selected_groups="$(tr ',' '\n' <<<"$selected_groups")"
+      fi
+      selected_group_ids="$(while IFS=$'\t' read -r group _; do [[ -n "$group" ]] && printf '%s\n' "$group"; done \
+        <<<"$selected_groups" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+    fi
+
+    item_rows="$(jq -r --argjson groups "$selected_group_ids" --argjson inventory "$inventory" '
+      .items[]
+      | select((.inventoryOnly // false) == false)
+      | . as $item
+      | select($item.group == null or ($groups | index($item.group)) == null)
+      | ($inventory.items | map(select(.id == $item.id and .installed == true)) | length > 0) as $installed
+      | [$item.id, ($item.name // $item.id), (if $installed then "installed" else "missing" end)] | @tsv
+    ' <<<"$catalog")"
+    if [[ -n "$item_rows" ]]; then
+      printf 'Individual applications not covered by selected groups:\n'
+      while IFS=$'\t' read -r id label state; do
+        printf '  %-24s %-28s %s\n' "$id" "$label" "$state"
+      done <<<"$item_rows"
+      if command -v gum >/dev/null 2>&1; then
+        selected_items="$(printf '%s\n' "$item_rows" | gum choose --no-limit --height=14 \
+          --header='Individual applications: SPACE select/unselect • ENTER confirm • select none to skip' || true)"
+      else
+        printf 'Application IDs, comma separated, or Enter to skip: '
+        read -r selected_items
+        selected_items="$(tr ',' '\n' <<<"$selected_items")"
+      fi
+      selected_item_ids="$(while IFS=$'\t' read -r id _; do [[ -n "$id" ]] && printf '%s\n' "$id"; done \
+        <<<"$selected_items" | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
+    fi
+
+    final_ids="$(jq -cn --argjson catalog "$catalog" --argjson groups "$selected_group_ids" \
+      --argjson items "$selected_item_ids" '
+        (([$catalog.items[] | . as $item | select($item.group != null and ($groups | index($item.group)) != null) | .id] + $items) | unique)
+      ')"
+    if (($(jq 'length' <<<"$final_ids") > 0)); then
+      write_profile_provider_packages "$provider_name" "$final_ids"
+      printf 'Selected %s application(s) from %s.\n' "$(jq 'length' <<<"$final_ids")" "$provider_name"
+    else
+      printf 'No applications selected from %s.\n' "$provider_name"
     fi
   done < <(jq -c '.[]' <<<"$EXTENSIONS_JSON")
 }
@@ -1202,7 +1291,7 @@ reconcile_profile_providers() {
   while IFS= read -r provider_name; do
     provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
     [[ -n "$provider" ]] || fail "profile $PROFILE requires unavailable provider: $provider_name"
-    jq -e '.schemaVersion == 1 and (.capabilities | index("inventory")) and (.capabilities | index("install"))' \
+    jq -e '.schemaVersion == 2 and (.capabilities | index("inventory")) and (.capabilities | index("install"))' \
       >/dev/null <<<"$provider" || fail "provider $provider_name cannot reconcile profile applications"
     command="$(jq -r '.executable' <<<"$provider")"
     [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
@@ -1671,6 +1760,42 @@ snapshot_environment() {
   } >"$secret_template"
 }
 
+snapshot_provider_extensions() {
+  local destination="$1" provider name command output platform temporary config="$destination/home-weave.json"
+  load_builtin_provider
+  platform=linux
+  [[ "$(uname -s)" != Darwin ]] || platform=macos
+  mkdir -p "$destination/metadata"
+  while IFS= read -r provider; do
+    jq -e '.schemaVersion == 2 and (.capabilities | index("snapshot"))' \
+      >/dev/null <<<"$provider" || continue
+    name="$(jq -r '.name' <<<"$provider")"
+    [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe snapshot provider name: $name"
+    command="$(jq -r '.executable' <<<"$provider")"
+    [[ -x "$command" ]] || fail "snapshot provider executable is unavailable: $command"
+    output="$($command snapshot)" || fail "provider snapshot failed: $name"
+    jq -e '.schemaVersion == 1 and (.selectedPackages | type == "array") and (.inventory | type == "object")' \
+      >/dev/null <<<"$output" || fail "provider $name returned an invalid snapshot"
+    printf '%s\n' "$output" | jq '.' >"$destination/metadata/provider-$name.json"
+    temporary="$config.tmp.$$"
+    jq --arg profile "$PROFILE" --arg platform "$platform" --arg provider "$name" \
+      --argjson selected "$(jq -c '.selectedPackages' <<<"$output")" '
+        .profiles[$profile].platforms = (.profiles[$profile].platforms // {})
+        | .profiles[$profile].platforms[$platform] = (.profiles[$profile].platforms[$platform] // {})
+        | .profiles[$profile].platforms[$platform].packages = (.profiles[$profile].platforms[$platform].packages // {})
+        | .profiles[$profile].platforms[$platform].packages.providers =
+            (.profiles[$profile].platforms[$platform].packages.providers // {})
+        | .profiles[$profile].platforms[$platform].packages.providers[$provider] = $selected
+      ' "$config" >"$temporary"
+    mv "$temporary" "$config"
+    temporary="$destination/snapshot.json.tmp.$$"
+    jq --arg provider "$name" --argjson snapshot "$output" \
+      '.providerSnapshots = (.providerSnapshots // {}) | .providerSnapshots[$provider] = $snapshot' \
+      "$destination/snapshot.json" >"$temporary"
+    mv "$temporary" "$destination/snapshot.json"
+  done < <(jq -c '.[]' <<<"$EXTENSIONS_JSON")
+}
+
 snapshot_create() {
   local destination="${POSITIONAL_ARGS[1]:-$HOME/home-weave-snapshot-$(date -u +%Y%m%dT%H%M%SZ)}"
   local receipt='{}' profiles external='[]' timestamp
@@ -1709,6 +1834,7 @@ snapshot_create() {
       observedExternalNixProfile: $external,
       portability: {externalNixProfileIsInventoryOnly: true, secretValuesIncluded: false}}' \
     >"$destination/snapshot.json"
+  snapshot_provider_extensions "$destination"
   mkdir -p "$destination/.state"
   jq -r '.activeProfile' "$destination/snapshot.json" >"$destination/.state/selected-profile"
   jq -r '.shell' "$destination/snapshot.json" >"$destination/.state/primary-shell"
@@ -1778,7 +1904,7 @@ profile_command() {
       [[ -n "$(jq -r --arg name "$EXTENDS" '.[$name] // empty' <<<"$profiles")" ]] || fail "parent profile does not exist: $EXTENDS"
       file="$ROOT/home-weave.json"
       jq --arg name "$name" --arg parent "$EXTENDS" \
-        '.profiles[$name] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], packages: {nix: []}}' \
+        '.profiles[$name] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], exclude: {}, packages: {nix: []}}' \
         "$file" >"$file.tmp.$$"
       mv "$file.tmp.$$" "$file"
       printf 'Created profile %s extending %s.\n' "$name" "$EXTENDS"
@@ -1788,15 +1914,10 @@ profile_command() {
       target_json="$(jq -ce --arg name "$name" '.[$name]' <<<"$profiles")" || fail "profile does not exist: $name"
       current_json="$(jq -c --arg name "${active:-base}" '.[$name] // {}' <<<"$profiles")"
       printf 'Profile diff: %s -> %s\n' "${active:-none}" "$name"
-      catalog="$(nix --extra-experimental-features 'nix-command flakes' eval --json "$BASE_URL#lib.packageCatalog")"
-      old_packages="$(jq -cn --argjson profile "$current_json" --argjson catalog "$catalog" '
-        (($catalog.base // []) + (if ($profile.development // false) then ($catalog.development // []) else [] end)
-          + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
-          + ($profile.shells // []) + ($profile.nixPackages // [])) | unique')"
-      new_packages="$(jq -cn --argjson profile "$target_json" --argjson catalog "$catalog" '
-        (($catalog.base // []) + (if ($profile.development // false) then ($catalog.development // []) else [] end)
-          + (($profile.packageGroups // []) | map($catalog.groups[.] // []) | add // [])
-          + ($profile.shells // []) + ($profile.nixPackages // [])) | unique')"
+      old_packages="$(jq -cn --argjson profile "$current_json" \
+        '((($profile.shells // []) + ($profile.nixPackages // [])) | unique)')"
+      new_packages="$(jq -cn --argjson profile "$target_json" \
+        '((($profile.shells // []) + ($profile.nixPackages // [])) | unique)')"
       printf '\npackages:\n'
       jq -nr --argjson old "$old_packages" --argjson new "$new_packages" \
         '(($new - $old)[] | "+ " + .), (($old - $new)[] | "- " + .)' || true
@@ -1816,7 +1937,7 @@ profile_command() {
       ' || true
       printf '\nnativePackages:\n'
       jq -nr --argjson old "$current_json" --argjson new "$target_json" '
-        ["homebrewFormulae", "apt", "pacman"][] as $manager
+        ["homebrewFormulae", "homebrewCasks", "apt", "pacman"][] as $manager
         | (((($new.nativePackages[$manager] // []) - ($old.nativePackages[$manager] // []))[])
             | "+ [" + $manager + "] " + .),
           (((($old.nativePackages[$manager] // []) - ($new.nativePackages[$manager] // []))[])
@@ -2264,6 +2385,7 @@ setup_command() {
     fi
   fi
   select_optional_packages
+  select_provider_packages
   write_pending_state
   show_profile_packages
   scan_dotfiles
@@ -2455,7 +2577,7 @@ provider_command() {
   [[ -n "$provider_name" ]] || fail "provider $action requires a provider name"
   provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
   [[ -n "$provider" ]] || fail "unknown provider: $provider_name"
-  jq -e '.schemaVersion == 1' >/dev/null <<<"$provider" || fail "unsupported provider schema"
+  jq -e '.schemaVersion == 2' >/dev/null <<<"$provider" || fail "unsupported provider schema"
   command="$(jq -r '.executable' <<<"$provider")"
   removal_policy="$(jq -r '.removalPolicy // "remove"' <<<"$provider")"
   capabilities="$(jq -r '.capabilities[]' <<<"$provider")"
@@ -2487,7 +2609,7 @@ extension_command() {
   fi
   extension="$(jq -c --arg name "$name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
   [[ -n "$extension" ]] || fail "unknown extension: $name"
-  jq -e '.schemaVersion == 1 and (.capabilities | index("command"))' >/dev/null <<<"$extension" \
+  jq -e '.schemaVersion == 2 and (.capabilities | index("command"))' >/dev/null <<<"$extension" \
     || fail "$name is not a command extension"
   command="$(jq -r '.executable' <<<"$extension")"
   [[ -x "$command" ]] || fail "extension executable is unavailable: $command"

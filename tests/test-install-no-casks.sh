@@ -3,6 +3,14 @@
 set -Eeuo pipefail
 
 installer="$1"
+flake="${2:-}"
+
+if [[ -n "$flake" ]]; then
+  grep -Fq 'export HOME_WEAVE_PREFLIGHT_REPORTER=' "$flake" || {
+    printf 'packaged setup app does not provide its pinned preflight reporter\n' >&2
+    exit 1
+  }
+fi
 
 grep -Fq 'CONFIG_FLAKE="path:$CONFIG_DIR"' "$installer" || {
   printf 'generated flake is not forced to an explicit path reference\n' >&2
@@ -24,12 +32,16 @@ grep -Fq "'.substitutions | length'" "$installer" || {
   printf 'cached preflight substitution count is not derived safely from JSON\n' >&2
   exit 1
 }
-if grep -Fq 'map toString pkgs.homeWeavePackageGroups' "$installer"; then
-  printf 'inventory grouping still evaluates every optional package derivation\n' >&2
+grep -Fq 'declaredPackageNames = builtins.fromJSON' "$installer" || {
+  printf 'inventory does not use the resolved package declaration\n' >&2
   exit 1
-fi
-grep -Fq 'nix-base.lib.packageCatalog.groups' "$installer" || {
-  printf 'inventory grouping does not use inert package catalog names\n' >&2
+}
+grep -Fq 'packageOrigins = builtins.fromJSON' "$installer" || {
+  printf 'inventory does not preserve resolved package origins\n' >&2
+  exit 1
+}
+grep -Fq 'inherit (details) group inheritedFrom sourceProfile origins' "$installer" || {
+  printf 'inventory omits resolved inheritance metadata\n' >&2
   exit 1
 }
 grep -Fq 'last-inventory.json' "$installer" || {

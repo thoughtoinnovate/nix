@@ -39,7 +39,9 @@
     let
       baseOverlay = import ./overlays/base.nix;
       developmentOverlay = import ./overlays/development.nix;
+      publicPackageCatalog = import ./lib/package-catalog.nix;
       profileConfig = import ./lib/profile-config.nix { lib = nixpkgs.lib; };
+      declarativePackages = import ./lib/declarative-packages.nix { lib = nixpkgs.lib; };
       defaultProfileManifest = builtins.fromJSON (builtins.readFile ./templates/profile/home-weave.json);
       defaultCoreManifest = defaultProfileManifest // {
         distribution.name = "home-weave-core";
@@ -49,14 +51,14 @@
             shells = [ "zsh" ];
             primaryShell = "zsh";
             dotfiles = [ "common" "starship" "ghostty" "nvim" "shells" ];
-            packages.nix = [ ];
+            packages.nix = publicPackageCatalog.base;
           };
           development = {
             extends = "base";
             development = true;
             packageGroups = [ ];
             dotfiles = [ ];
-            packages.nix = [ ];
+            packages.nix = publicPackageCatalog.development;
           };
         };
       };
@@ -66,6 +68,7 @@
           config = defaultCoreManifest;
           sourceRoot = self.outPath;
           sourceName = "home-weave-core";
+          packageCatalog = publicPackageCatalog;
           inherit system;
         });
       # nixpkgs-unstable's Darwin linker fix landed before its Starship output
@@ -113,7 +116,18 @@
         {
           type = "app";
           program = "${wrapper}/bin/home-weave";
+          meta.description = "Manage the ${distributionName} HomeWeave distribution";
         };
+      mkHomeWeaveDistribution = import ./lib/distribution.nix {
+        lib = nixpkgs.lib;
+        core = self;
+        inherit nixpkgs profileConfig publicPackageCatalog declarativePackages mkHomeWeaveApp;
+        profileConfigSchema = ./schemas/home-weave-v3.schema.json;
+        declarativePackageSchema = ./schemas/declarative-packages-v1.schema.json;
+        nixpkgs-x86-darwin = inputs.nixpkgs-x86-darwin;
+        home-manager = inputs.home-manager;
+        home-manager-x86-darwin = inputs.home-manager-x86-darwin;
+      };
     in
     flake-utils.lib.eachSystem
       [
@@ -238,6 +252,7 @@
                   ];
                   text = ''
                     export HOME_WEAVE_DOTFILE_COMPOSER=${./lib/compose-dotfiles.sh}
+                    export HOME_WEAVE_PREFLIGHT_REPORTER=${./lib/preflight-report.sh}
                     exec ${pkgs.bash}/bin/bash ${./install.sh} "$@"
                   '';
                 }
@@ -263,10 +278,11 @@
             profile-config =
               let
                 fixture = {
-                  schemaVersion = 2;
+                  schemaVersion = 3;
                   defaults.profile = "child";
                   profiles = {
                     base = {
+                      extends = null;
                       shells = [ "zsh" ];
                       primaryShell = "zsh";
                       dotfiles = [ "common" "nvim" ];
@@ -282,7 +298,10 @@
                     };
                     child = {
                       extends = "base";
-                      dotfilesRemove = [ "nvim" ];
+                      exclude = {
+                        dotfiles = [ "nvim" ];
+                        packages.nix = [ "jq" ];
+                      };
                       dotfiles = [ "work-nvim" ];
                       packages.nix = [ "ripgrep" ];
                     };
@@ -293,16 +312,94 @@
                   sourceRoot = ./tests/fixtures;
                   sourceName = "fixture";
                   system = "aarch64-darwin";
+                  packageCatalog = publicPackageCatalog;
                 };
                 linux = profileConfig.resolve {
                   config = fixture;
                   sourceRoot = ./tests/fixtures;
                   sourceName = "fixture";
                   system = "x86_64-linux";
+                  packageCatalog = publicPackageCatalog;
                 };
+                strictDarwinFixture = {
+                  schemaVersion = 3;
+                  defaults.profile = "minimal";
+                  profiles = {
+                    parent = {
+                      extends = null;
+                      packageGroups = [ "cloud" ];
+                      dotfiles = [ "nvim" ];
+                      packages.nix = [ "jq" ];
+                      platforms.macos.packages = {
+                        homebrew = { formulae = [ "vault" ]; casks = [ "example-app" ]; };
+                        providers.enterprise = [ "managed-app" ];
+                      };
+                    };
+                    minimal = {
+                      extends = "parent";
+                      exclude = {
+                        dotfiles = [ "nvim" ];
+                        packageGroups = [ "cloud" ];
+                        packages = {
+                          nix = [ "jq" ];
+                          homebrew = { formulae = [ "vault" ]; casks = [ "example-app" ]; };
+                          providers.enterprise = [ "managed-app" ];
+                        };
+                      };
+                    };
+                  };
+                };
+                strictDarwin = profileConfig.resolve {
+                  config = strictDarwinFixture;
+                  sourceRoot = ./tests/fixtures;
+                  sourceName = "strict-fixture";
+                  system = "aarch64-darwin";
+                  packageCatalog = publicPackageCatalog;
+                };
+                strictLinuxFixture = {
+                  schemaVersion = 3;
+                  defaults.profile = "minimal";
+                  profiles = {
+                    parent = {
+                      extends = null;
+                      platforms.linux.packages = {
+                        apt = [ "curl" ];
+                        pacman = [ "ripgrep" ];
+                      };
+                    };
+                    minimal = {
+                      extends = "parent";
+                      exclude.packages = {
+                        apt = [ "curl" ];
+                        pacman = [ "ripgrep" ];
+                      };
+                    };
+                  };
+                };
+                strictLinux = profileConfig.resolve {
+                  config = strictLinuxFixture;
+                  sourceRoot = ./tests/fixtures;
+                  sourceName = "strict-linux-fixture";
+                  system = "x86_64-linux";
+                  packageCatalog = publicPackageCatalog;
+                };
+                invalidExclusion = builtins.tryEval (builtins.deepSeq
+                  (profileConfig.resolve {
+                    config = strictDarwinFixture // {
+                      profiles = strictDarwinFixture.profiles // {
+                        minimal = strictDarwinFixture.profiles.minimal // {
+                          exclude.packages.nix = [ "misspelled-package" ];
+                        };
+                      };
+                    };
+                    sourceRoot = ./tests/fixtures;
+                    sourceName = "invalid-fixture";
+                    system = "aarch64-darwin";
+                    packageCatalog = publicPackageCatalog;
+                  }).profiles.minimal.nixPackages true);
               in
               assert darwin.profiles.child.dotfiles == [ "common" "work-nvim" ];
-              assert darwin.profiles.child.nixPackages == [ "jq" "claude-code" "ripgrep" ];
+              assert darwin.profiles.child.nixPackages == [ "claude-code" "ripgrep" ];
               assert darwin.profiles.child.allowUnfree == [ "claude-code" ];
               assert darwin.profiles.child.nativePackages.homebrewFormulae == [ "vault" ];
               assert darwin.profiles.child.providerPackages.company == [ "approved-app" ];
@@ -311,8 +408,19 @@
                 "fixture--child"
               ];
               assert linux.profiles.child.nativePackages.apt == [ "curl" ];
-              pkgs.runCommand "profile-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
-                jq -e . ${./schemas/home-weave-v2.schema.json} >/dev/null
+              assert strictDarwin.profiles.minimal.nixPackages == [ ];
+              assert strictDarwin.profiles.minimal.dotfiles == [ ];
+              assert strictDarwin.profiles.minimal.nativePackages.homebrewFormulae == [ ];
+              assert strictDarwin.profiles.minimal.nativePackages.homebrewCasks == [ ];
+              assert strictDarwin.profiles.minimal.providerPackages == { };
+              assert strictLinux.profiles.minimal.nativePackages.apt == [ ];
+              assert strictLinux.profiles.minimal.nativePackages.pacman == [ ];
+              assert invalidExclusion.success == false;
+              pkgs.runCommand "profile-config" { nativeBuildInputs = [ pkgs.jq pkgs.check-jsonschema ]; } ''
+                jq -e . ${./schemas/home-weave-v3.schema.json} >/dev/null
+                check-jsonschema --schemafile ${./schemas/home-weave-v3.schema.json} \
+                  ${./templates/profile/home-weave.json} \
+                  ${./templates/distribution/profile-overlay/home-weave.json}
                 touch $out
               '';
 
@@ -392,6 +500,7 @@
                     gnugrep
                     gnused
                     jq
+                    nix
                     ripgrep
                     rsync
                     stow
@@ -454,7 +563,7 @@
                   nativeBuildInputs = [ pkgs.gnused ];
                 }
                 ''
-                  bash ${./tests/test-install-no-casks.sh} ${./install.sh}
+                  bash ${./tests/test-install-no-casks.sh} ${./install.sh} ${./flake.nix}
                   touch $out
                 '';
 
@@ -474,6 +583,53 @@
                     ${./lib/verified-installer.sh}
                   touch $out
                 '';
+
+            declarative-package-policy =
+              let
+                evaluateCatalog = catalog:
+                  let candidate = import packageSource {
+                    inherit system;
+                    overlays = [ (declarativePackages.mkOverlay { inherit catalog; sourceRoot = ./.; }) ];
+                    config.allowUnsupportedSystem = true;
+                  };
+                  in builtins.tryEval (builtins.deepSeq candidate.policy-test.drvPath true);
+                badHost = evaluateCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    platforms.${system} = {
+                      url = "https://unreviewed.invalid/tool.tar.gz";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      install.kind = "copy-tree";
+                    };
+                  };
+                };
+                unsupported = evaluateCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    platforms."unsupported-system" = {
+                      url = "https://official.invalid/tool.tar.gz";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      install.kind = "copy-tree";
+                    };
+                  };
+                };
+                wrongVersion = evaluateCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "nixpkgs"; attr = "jq"; version = "0.0-invalid";
+                  };
+                };
+              in
+              assert badHost.success == false;
+              assert unsupported.success == false;
+              assert wrongVersion.success == false;
+              pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
+                check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
+                  ${./tests/fixtures/declarative-packages.json}
+                touch $out
+              '';
           };
         }
       )
@@ -498,9 +654,9 @@
 
       lib.dotfiles.path = ./dotfiles;
       lib.profileConfig = profileConfig;
-      lib.profileConfigSchema = ./schemas/home-weave-v2.schema.json;
+      lib.profileConfigSchema = ./schemas/home-weave-v3.schema.json;
       lib.setup = {
-        schemaVersion = 4;
+        schemaVersion = 5;
         namespace = "home-weave";
         defaults = { profile = "base"; shell = "zsh"; };
         profilesBySystem = nixpkgs.lib.mapAttrs (_: value: value.profiles) defaultResolvedBySystem;
@@ -513,82 +669,10 @@
         program = ./lib/verified-installer.sh;
       };
       lib.mkHomeWeaveApp = mkHomeWeaveApp;
-      lib.packageCatalog = {
-        base = [
-          "clang"
-          "fd"
-          "git"
-          "gnumake"
-          "home-weave-cli"
-          "home-weave-env"
-          "neovim"
-          "nodejs"
-          "python3"
-          "ripgrep"
-          "starship"
-          "stow"
-          "unzip"
-        ];
-        development = [
-          "jq"
-          "lazygit"
-          "shellcheck"
-          "shfmt"
-          "tmux"
-        ];
-        groups = {
-          python = [
-            "python3"
-            "python3Packages.debugpy"
-            "black"
-            "pyright"
-            "ruff"
-          ];
-          data-jupyter = [
-            "jupyter"
-            "python3Packages.notebook"
-            "python3Packages.ipykernel"
-            "jupytext"
-            "python3Packages.pillow"
-            "python3Packages.cairosvg"
-          ];
-          go = [
-            "go"
-            "gopls"
-            "delve"
-            "golangci-lint"
-          ];
-          rust = [
-            "cargo"
-            "rustc"
-            "rust-analyzer"
-            "taplo"
-          ];
-          java = [
-            "jdk17"
-            "gradle"
-            "jdt-language-server"
-            "google-java-format"
-          ];
-          web = [
-            "eslint"
-            "prettier"
-            "typescript-language-server"
-            "yaml-language-server"
-            "marksman"
-            "markdownlint-cli2"
-            "vscode-langservers-extracted"
-            "vscode-js-debug"
-          ];
-          cloud = [
-            "awscli2"
-            "terraform"
-            "kubectl"
-            "minikube"
-          ];
-          desktop = [ "vscode" ];
-        };
-      };
+      lib.packageCatalog = publicPackageCatalog;
+      lib.declarativePackages = declarativePackages;
+      lib.declarativePackageSchema = ./schemas/declarative-packages-v1.schema.json;
+      lib.mkHomeWeaveDistribution = mkHomeWeaveDistribution;
 
       templates.default = {
         path = ./templates/consumer;

@@ -40,7 +40,7 @@ test -x "$ROOT/home-weave"
 test ! -e "$ROOT/.state/active-profile"
 test "$(<"$ROOT/.state/selected-profile")" = work
 test "$(<"$ROOT/.state/primary-shell")" = fish
-jq -e '.schemaVersion == 2
+jq -e '.schemaVersion == 3
   and .profiles.work.extends == "development"
   and .profiles.work.shells == ["fish", "zsh"]
   and .profiles.work.packageGroups == ["cloud"]
@@ -190,7 +190,9 @@ cat >"$provider" <<'EOF'
 #!/usr/bin/env bash
 set -eu
 case "$1" in
+  catalog) printf '%s\n' '{"schemaVersion":1,"groups":[{"id":"tools","name":"Tools"}],"items":[{"id":"managed","name":"Managed App","group":"tools"}]}' ;;
   inventory) printf '%s\n' '{"schemaVersion":1,"items":[{"id":"managed","name":"Managed App","installed":true}]}' ;;
+  snapshot) printf '%s\n' '{"schemaVersion":1,"selectedPackages":["managed"],"inventory":{"schemaVersion":1,"items":[{"id":"managed","installed":true}]}}' ;;
   search) printf '%s\n' '{"schemaVersion":1,"items":[]}' ;;
   plan) printf 'plan %s\n' "$*" >>"$PROVIDER_LOG" ;;
   apply) printf 'apply %s\n' "$*" >>"$PROVIDER_LOG" ;;
@@ -199,13 +201,16 @@ esac
 EOF
 chmod +x "$provider"
 manifest="$(jq -cn --arg executable "$provider" '[{
-  schemaVersion: 1,
+  schemaVersion: 2,
   name: "fake",
   executable: $executable,
-  capabilities: ["inventory", "search", "install", "update", "remove", "command"]
+  removalPolicy: "remove",
+  platforms: ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"],
+  capabilities: ["catalog", "inventory", "search", "install", "update", "remove", "snapshot", "command"]
 }]')"
 
-HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli provider list | grep -Fq $'fake\tinventory,search,install,update,remove,command'
+HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli provider list | grep -Fq $'fake\tcatalog,inventory,search,install,update,remove,snapshot,command'
+HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli provider catalog fake | jq -e '.groups[0].id == "tools"' >/dev/null
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli provider inventory fake | grep -Fq 'Managed App'
 PROVIDER_LOG="$provider_log" HOME_WEAVE_EXTENSIONS_JSON="$manifest" \
   run_cli provider install fake managed --yes
@@ -213,6 +218,15 @@ grep -Fq 'plan plan --action install managed' "$provider_log"
 grep -Fq 'apply apply --action install managed' "$provider_log"
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension list | grep -Fxq fake
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension fake status | grep -Fq 'command command status'
+
+PROVIDER_SNAPSHOT="$TEST_HOME/provider-snapshot"
+PATH="$snapshot_bin:$PATH" HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli snapshot create "$PROVIDER_SNAPSHOT"
+jq -e '.providerSnapshots.fake.selectedPackages == ["managed"]' "$PROVIDER_SNAPSHOT/snapshot.json" >/dev/null
+snapshot_platform=linux
+[[ "$(uname -s)" != Darwin ]] || snapshot_platform=macos
+jq -e --arg platform "$snapshot_platform" '.profiles.base.platforms[$platform].packages.providers.fake == ["managed"]' \
+  "$PROVIDER_SNAPSHOT/home-weave.json" >/dev/null
+test -f "$PROVIDER_SNAPSHOT/metadata/provider-fake.json"
 
 # Git is optional. Update must address the HomeWeave root as an explicit path
 # flake so untracked or ignored files are not filtered by Nix's Git fetcher.

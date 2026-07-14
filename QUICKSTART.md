@@ -144,6 +144,7 @@ Groups can also be changed later through `packageGroups` in
   "extends": "development",
   "shells": ["zsh"],
   "primaryShell": "zsh",
+  "exclude": {},
   "packageGroups": ["python", "go", "cloud"],
   "dotfiles": [],
   "packages": {
@@ -167,12 +168,115 @@ Available groups are:
 
 Run `plan` and `apply` again after editing a profile.
 
+To remove inherited content without editing its parent, use strict exclusions:
+
+```json
+"exclude": {
+  "dotfiles": ["nvim"],
+  "packageGroups": ["cloud"],
+  "packages": {
+    "nix": ["kubectl"],
+    "homebrew": {"formulae": [], "casks": []},
+    "providers": {"company-self-service": ["optional-app"]}
+  }
+}
+```
+
+Every excluded name must exist in the inherited profile. Use `"extends": null`
+when a profile should inherit no selected packages or dotfiles.
+
 Private work distributions can expose reviewed provider applications through
 `platforms.<os>.packages.providers`, keyed by the provider name. HomeWeave inventories them,
 shows the provider plan, and asks before each missing application is installed.
 Provider trust and lifecycle policy are displayed separately from publisher
 verification. Applications from a retain-policy MDM provider remain managed by
 that MDM and are reported as retained during uninstall and nuke.
+
+## Add packages, applications, and dotfiles later
+
+`home-weave.json` is the source of truth. Put cross-platform command-line
+packages in its `packages.nix` field, select large public toolchains with
+`packageGroups`, and declare OS-specific software under `platforms`:
+
+```json
+"work": {
+  "extends": "development",
+  "shells": ["fish"],
+  "primaryShell": "fish",
+  "exclude": {},
+  "packageGroups": ["python"],
+  "dotfiles": ["custom"],
+  "packages": {
+    "nix": ["bat", "jq"]
+  },
+  "platforms": {
+    "macos": {
+      "packages": {
+        "homebrew": {"formulae": ["shellcheck"], "casks": ["firefox"]},
+        "providers": {"company-self-service": ["approved-app"]}
+      }
+    },
+    "linux": {
+      "distributions": {
+        "ubuntu": {"packages": {"apt": ["ripgrep"]}},
+        "arch": {"packages": {"pacman": ["ripgrep"]}}
+      }
+    }
+  }
+}
+```
+
+Use only providers registered by the distribution. Raw URLs, third-party taps,
+and `curl | sh` commands do not belong in a profile manifest; add them through
+a reviewed provider with checksum/signature verification and a removal policy.
+
+Dotfile components follow normal GNU Stow layout. The first directory is the
+component name, and everything below it is the final path relative to `$HOME`:
+
+```text
+dotfiles/custom/.config/git/config  -> ~/.config/git/config
+dotfiles/custom/.config/nvim/init.lua -> ~/.config/nvim/init.lua
+dotfiles/custom/.aws/config        -> ~/.aws/config
+dotfiles/custom/.aws_functions     -> ~/.aws_functions
+```
+
+Select the component with `"dotfiles": ["custom"]`. Edit the source under the
+repository's `dotfiles/` directory—not the live home path when `readlink` shows
+that it points into `.state/dotfiles/current`. That directory is a generated
+composition and can be replaced by the next activation.
+
+For a repository created by setup, the normal edit loop is:
+
+```sh
+cd ~/.home-weave
+$EDITOR home-weave.json
+$EDITOR dotfiles/custom/.config/example/config
+./home-weave plan
+./home-weave apply
+git diff
+./home-weave sync
+```
+
+`sync` scans for secrets, shows the changes, and can commit/push when the
+repository has a Git remote. Without a remote, use normal `git add`, `commit`,
+and `push` after configuring one. Never commit `.home_weave_secrets`, cloud
+credentials, SSO caches, `.state`, or backups.
+
+Central distribution maintainers should edit and commit the distribution's
+source component. To preview a dotfile-only change quickly without repeating
+package downloads, copy that component into a disposable installed root and
+apply it:
+
+```sh
+rsync -a --delete /path/to/source/dotfiles/custom/ \
+  ~/.home-weave-test/dotfiles/custom/
+~/.home-weave-test/home-weave plan
+~/.home-weave-test/home-weave apply
+```
+
+When package selections are unchanged, Nix reuses its store and HomeWeave only
+recomposes the dotfiles and refreshes Stow links. Rerun setup from the published
+revision when verifying the complete installation that other users will get.
 
 ## Work with multiple profiles
 

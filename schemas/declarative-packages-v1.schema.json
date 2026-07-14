@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/declarative-packages-v1.schema.json",
+  "title": "HomeWeave declarative package catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "packages"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "packages": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z0-9][A-Za-z0-9+._-]*$"},
+      "additionalProperties": {"$ref": "#/$defs/package"}
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package"],
+      "properties": {
+        "package": {"type": "string"},
+        "path": {"type": "string"}
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {"type": "string"},
+        "homepage": {"type": "string", "format": "uri"},
+        "license": {"type": "string"},
+        "mainProgram": {"type": "string"}
+      }
+    },
+    "install": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {"enum": ["copy-tree", "executables", "run"]},
+        "program": {"type": "string"},
+        "args": {"type": "array", "items": {"type": "string"}},
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["source", "target"],
+            "properties": {"source": {"type": "string"}, "target": {"type": "string"}}
+          }
+        }
+      }
+    },
+    "platformArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "sha256", "install"],
+      "properties": {
+        "url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"type": "string", "pattern": "^sha256-"},
+        "format": {"enum": ["archive", "zip", "gzip", "raw"]},
+        "sourceRoot": {"type": "string"},
+        "install": {"$ref": "#/$defs/install"}
+      }
+    },
+    "package": {
+      "type": "object",
+      "required": ["kind", "version"],
+      "properties": {
+        "kind": {"enum": ["nixpkgs", "archive", "bundle", "script"]},
+        "version": {"type": "string", "minLength": 1},
+        "attr": {"type": "string"},
+        "allowUnfree": {"type": "boolean"},
+        "unfreeName": {"type": "string"},
+        "officialHosts": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "platforms": {"type": "object", "additionalProperties": {"$ref": "#/$defs/platformArtifact"}},
+        "members": {"type": "array", "items": {"type": "string"}},
+        "links": {"type": "array", "items": {"type": "object"}},
+        "aliases": {"type": "array", "items": {"type": "object"}},
+        "exposeBins": {"type": "array", "items": {"type": "object"}},
+        "defaultJavaHome": {"$ref": "#/$defs/reference"},
+        "passthru": {"type": "object"},
+        "environment": {"type": "object", "additionalProperties": {"$ref": "#/$defs/reference"}},
+        "scriptFile": {"type": "string"},
+        "executableName": {"type": "string"},
+        "runtimePackages": {"type": "array", "items": {"type": "string"}},
+        "substitutions": {"type": "object", "additionalProperties": {"$ref": "#/$defs/reference"}},
+        "meta": {"$ref": "#/$defs/meta"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

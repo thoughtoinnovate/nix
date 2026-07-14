@@ -43,8 +43,8 @@ providers are explicit under the target platform:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v2.schema.json",
-  "schemaVersion": 2,
+  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v3.schema.json",
+  "schemaVersion": 3,
   "distribution": {"name": "my-home-weave"},
   "defaults": {"profile": "work"},
   "profiles": {
@@ -52,6 +52,7 @@ providers are explicit under the target platform:
       "extends": "development",
       "shells": ["fish", "zsh"],
       "primaryShell": "fish",
+      "exclude": {"dotfiles": [], "packageGroups": [], "packages": {"nix": [], "providers": {}}},
       "dotfiles": ["neovim", "starship"],
       "packages": {"nix": ["jq", "vault"]},
       "platforms": {
@@ -77,6 +78,12 @@ Each package has exactly one declared source; HomeWeave never silently falls
 back to another manager or raw installer. URL-based software belongs in a
 reviewed provider that owns its URL, hash/signature checks, receipt, and
 removal policy—not directly in this manifest.
+
+Every profile declares `extends`; use `null` for a standalone profile. A child
+can strictly exclude inherited dotfiles, groups, Nix packages, native packages,
+or provider item IDs through `exclude`. Misspelled and non-inherited exclusions
+stop evaluation. Excluding and adding the same dotfile component explicitly
+replaces the inherited component.
 
 Dotfiles use native GNU Stow package structure. For example,
 `dotfiles/neovim/.config/nvim/init.lua` maps to
@@ -244,9 +251,16 @@ nix run 'git+ssh://git@example.org/owner/home-weave-distribution.git#home-weave'
 The work edition pins this public core, supplies work profiles and extensions,
 and re-exports the same CLI. Employees do not run personal setup first. The
 versioned provider contract supports inventory, search, install, update, and
-remove operations with a displayed plan and explicit confirmation. IRU code
-belongs only in the private work repository; the public core contains the
-generic provider interface.
+remove operations with a displayed plan and explicit confirmation. Enterprise
+MDM implementations and catalogs belong only in private repositories; the
+public core contains only the generic provider interface.
+
+Child flakes call `lib.mkHomeWeaveDistribution`. The constructor resolves
+parent profiles, creates system-captured Home Manager modules, inherits parent
+adapters, and exports the standard apps and checks. Exact vendor archives can
+use `schemas/declarative-packages-v1.schema.json`; the builder enforces
+per-system HTTPS URLs, reviewed hosts, fixed SHA-256 hashes, and declarative
+installation layouts.
 
 The built-in `native-official` provider supports official Homebrew
 formulae/casks on macOS, configured official Debian/Ubuntu APT repositories,

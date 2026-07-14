@@ -334,15 +334,15 @@ initialize_profile_interactive() {
 initialize_profile_interactive
 
 [[ -n "$CONFIG_URL" ]] \
-  || fail "a schema-v2 profile is required; run home-weave setup or pass --config-url"
+  || fail "a schema-v3 profile is required; run home-weave setup or pass --config-url"
 
 if [[ -n "$CONFIG_URL" ]]; then
   if ! command -v jq >/dev/null 2>&1 || ! command -v rsync >/dev/null 2>&1; then
     fail "profile setup requires the packaged setup app (nix run ...#setup)"
   fi
   schema_version="$(nix "${NIX_FLAGS[@]}" eval --json "$CONFIG_URL#lib.setup.schemaVersion")"
-  [[ "$schema_version" == "4" ]] \
-    || fail "unsupported profile schema: $schema_version (this HomeWeave release requires schema 4)"
+  [[ "$schema_version" == "5" ]] \
+    || fail "unsupported setup API: $schema_version (this HomeWeave release requires setup API 5)"
   if [[ -z "$NAMESPACE" ]]; then
     if profile_namespace="$(nix "${NIX_FLAGS[@]}" eval --raw "$CONFIG_URL#lib.setup.namespace" 2>/dev/null)"; then
       NAMESPACE="$profile_namespace"
@@ -398,11 +398,13 @@ TEMP_FLAKE="$CONFIG_DIR/.flake.nix.tmp"
 DEVELOPMENT_ENABLED=false
 [[ "$(jq -r '.development // false' <<<"$profile_json")" == true ]] && DEVELOPMENT_ENABLED=true
 UNFREE_PACKAGES="$(jq -r '.allowUnfree | map(@json) | join(" ")' <<<"$profile_json")"
+PROFILE_PACKAGE_NAMES_JSON="$(jq -c '.nixPackages' <<<"$profile_json")"
+PACKAGE_ORIGINS_JSON="$(jq -c '.packageOrigins' <<<"$profile_json")"
 
 INPUT_DECLARATIONS="profile.url = \"$CONFIG_URL\";
     nix-base.follows = \"profile/nix-base\";"
 CUSTOM_OVERLAY="++ [ inputs.profile.overlays.default ]"
-CUSTOM_MODULE="inputs.profile.homeModules.profiles.\"$PROFILE\""
+CUSTOM_MODULE="inputs.profile.lib.setup.profileModulesBySystem.\"$SYSTEM\".profiles.\"$PROFILE\""
 
 cat >"$TEMP_FLAKE" <<EOF
 $MARKER
@@ -435,30 +437,37 @@ $MARKER
           builtins.elem (packageLib.getName pkg) [ $UNFREE_PACKAGES ];
         config.allowUnsupportedSystem = true;
       };
-      packageGroupNames = builtins.attrNames nix-base.lib.packageCatalog.groups;
-      catalogLeaf = attribute:
-        let parts = packageLib.splitString "." attribute;
-        in packageLib.last parts;
-      basePackageNames = map catalogLeaf nix-base.lib.packageCatalog.base;
-      developmentPackageNames = map catalogLeaf nix-base.lib.packageCatalog.development;
-      groupPackageNames = packageLib.mapAttrs
-        (_: packages: map catalogLeaf packages)
-        nix-base.lib.packageCatalog.groups;
-      groupFor = package:
+      declaredPackageNames = builtins.fromJSON ''$PROFILE_PACKAGE_NAMES_JSON'';
+      packageOrigins = builtins.fromJSON ''$PACKAGE_ORIGINS_JSON'';
+      packageFor = attribute:
+        packageLib.attrByPath (packageLib.splitString "." attribute)
+          (throw "HomeWeave package is unavailable: \${attribute}") pkgs;
+      declaredPackageMetadata = map (attribute: {
+        inherit attribute;
+        package = packageFor attribute;
+        origins = packageOrigins.\${attribute} or [ ];
+      }) declaredPackageNames;
+      metadataFor = package:
+        packageLib.findFirst
+          (candidate: toString candidate.package == toString package)
+          null
+          declaredPackageMetadata;
+      originDetailsFor = metadata:
         let
-          name = packageLib.getName package;
-          matches = builtins.filter
-            (group: builtins.elem name groupPackageNames.\${group})
-            packageGroupNames;
-        in if matches != [] then builtins.head matches
-          else if builtins.elem name developmentPackageNames then "development"
-          else if builtins.elem name basePackageNames then "base"
-          else "base";
-      inheritedFor = group:
-        if group == "base" && "$PROFILE" != "base" then "base"
-        else if group == "development" && "$PROFILE" != "development" then "development"
-        else if group != "base" && group != "development" then "$PROFILE"
-        else null;
+          origins = if metadata == null then [ ] else metadata.origins;
+          groupOrigins = builtins.filter (packageLib.hasPrefix "group:") origins;
+          profileOrigins = builtins.filter (packageLib.hasPrefix "profile:") origins;
+          sourceProfile = if profileOrigins == [ ] then null
+            else packageLib.removePrefix "profile:" (builtins.head profileOrigins);
+          group = if groupOrigins != [ ]
+            then packageLib.removePrefix "group:" (builtins.head groupOrigins)
+            else if sourceProfile != null then sourceProfile
+            else "shell";
+        in {
+          inherit origins sourceProfile group;
+          inheritedFrom = if sourceProfile != null && sourceProfile != "$PROFILE"
+            then sourceProfile else null;
+        };
     in
     rec {
       packages."$SYSTEM".home-manager = home-manager.packages."$SYSTEM".home-manager;
@@ -489,14 +498,18 @@ $MARKER
       };
 
       homeWeaveInventory."$SYSTEM" = map
-        (package: let group = groupFor package; in {
-          name = packageLib.getName package;
-          version = packageLib.getVersion package;
-          storePath = toString package;
-          source = "official NixOS package repository";
-          inherit group;
-          inheritedFrom = inheritedFor group;
-        })
+        (package:
+          let
+            metadata = metadataFor package;
+            details = originDetailsFor metadata;
+          in {
+            name = packageLib.getName package;
+            version = packageLib.getVersion package;
+            storePath = toString package;
+            source = "pinned Nix package set";
+            attribute = if metadata == null then null else metadata.attribute;
+            inherit (details) group inheritedFrom sourceProfile origins;
+          })
         homeConfigurations."$USER".config.home.packages;
     };
 }

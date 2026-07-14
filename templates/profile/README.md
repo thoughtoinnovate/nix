@@ -66,6 +66,37 @@ deduplicated just like Nix packages and groups:
 HomeWeave never substitutes a different provider when the declared provider is
 unavailable.
 
+## Day-two editing workflow
+
+Add Nix package attribute names to the selected profile's `packages.nix`, add
+large toolchains to `packageGroups`, and put operating-system applications
+under `platforms.<os>.packages`. URL installers must be supplied by a reviewed
+provider rather than embedded as shell commands.
+
+Every first-level directory under `dotfiles/` is a Stow component. Files below
+it mirror their final path under `$HOME`:
+
+```text
+dotfiles/custom/.config/tool/config -> ~/.config/tool/config
+dotfiles/custom/.local/bin/helper   -> ~/.local/bin/helper
+```
+
+Edit repository sources, then preview and activate them:
+
+```sh
+$EDITOR home-weave.json
+$EDITOR dotfiles/custom/.config/tool/config
+./home-weave plan
+./home-weave apply
+./home-weave status
+```
+
+Do not edit `.state/dotfiles/current`; it is generated and Stow links the home
+directory to it. Run `./home-weave sync` to review, secret-scan, commit, and
+push changes when this repository has a configured Git remote. Package caches
+are reused, so dotfile-only activations normally finish quickly. Never commit
+`.home_weave_secrets`, credentials, `.state`, or backups.
+
 Successful activations write immutable JSON receipts under
 `.state/receipts/`; inspect the latest activation with `./home-weave status`
 or `./home-weave status --json`. Manage definitions with `profile list`,
@@ -93,8 +124,8 @@ dotfiles/neovim/.config/nvim/init.lua -> ~/.config/nvim/init.lua
 ```
 
 Select it with `"dotfiles": ["neovim"]`. Child profiles inherit components,
-add new names uniquely, and can use `dotfilesRemove` for an intentional
-replacement. HomeWeave composes the generation and invokes Stow with `$HOME`
+add new names uniquely, and use `"exclude": {"dotfiles": ["neovim"]}` for an
+intentional removal or replacement. HomeWeave composes the generation and invokes Stow with `$HOME`
 as its target and `--no-folding`. Credentials and secret values must remain in
 local secret stores.
 

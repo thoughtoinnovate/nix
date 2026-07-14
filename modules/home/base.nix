@@ -6,6 +6,9 @@
 }:
 let
   cfg = config.homeWeave.base;
+  catalog = import ../../lib/package-catalog.nix;
+  packageFor = name:
+    lib.attrByPath (lib.splitString "." name) (throw "Nix package is unavailable: ${name}") pkgs;
 in
 {
   options.homeWeave.base = {
@@ -22,6 +25,12 @@ in
       );
       default = [ "zsh" ];
       description = "Shells to install and configure. The bootstrap script normally selects one.";
+    };
+
+    packageNames = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = catalog.base;
+      description = "Resolved Nix package attribute names for this profile.";
     };
 
     packageGroups = lib.mkOption {
@@ -54,7 +63,7 @@ in
     ];
 
     home.packages =
-      pkgs.commonToolPackages
+      map packageFor cfg.packageNames
       ++ map (shell: pkgs.shellPackages.${shell}) cfg.shells
       ++ lib.concatMap (group: pkgs.homeWeavePackageGroups.${group}) cfg.packageGroups;
   };
