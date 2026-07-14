@@ -19,6 +19,7 @@ PACKAGE_PREVIEW="${HOME_WEAVE_PACKAGE_PREVIEW:-$(cd "$(dirname "${BASH_SOURCE[0]
 PUBLISHER_REGISTRY="${HOME_WEAVE_PUBLISHER_REGISTRY:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/reviewed-publishers.json}"
 PUBLISHER_FILTER="${HOME_WEAVE_PUBLISHER_FILTER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/verify-publishers.jq}"
 ENV_RENDERER="${HOME_WEAVE_ENV_RENDERER:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/home-weave-env.sh}"
+CONFIG_SCHEMA="${HOME_WEAVE_CONFIG_SCHEMA:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/schemas/home-weave-v2.schema.json}"
 EXTENSIONS_JSON="${HOME_WEAVE_EXTENSIONS_JSON:-[] }"
 ASSUME_YES=false
 APPLY_NOW=""
@@ -74,6 +75,13 @@ fail() {
 
 warn() {
   printf 'warning: %s\n' "$*" >&2
+}
+
+current_nix_system() {
+  local os arch
+  case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) fail "unsupported operating system" ;; esac
+  case "$(uname -m)" in arm64|aarch64) arch=aarch64 ;; x86_64) arch=x86_64 ;; *) fail "unsupported architecture" ;; esac
+  printf '%s-%s' "$arch" "$os"
 }
 
 write_operation_metadata() {
@@ -149,6 +157,7 @@ Usage:
   home-weave apply [--root PATH] [--profile NAME]
   home-weave update [--root PATH]
   home-weave profile list|show|create|diff|switch|delete ...
+  home-weave config validate|show [PROFILE] [--root PATH]
   home-weave status [--profile NAME] [--json]
   home-weave logs [--latest] [--tail N]
   home-weave snapshot create [PATH] [--root PATH]
@@ -459,9 +468,12 @@ read_state() {
 
 choose_profile() {
   local choice custom parent profiles answer
+  local config="$ROOT/home-weave.json"
+  [[ -f "$config" ]] || fail "profile configuration is missing: $config"
   if [[ -n "$PROFILE" ]]; then
     validate_name "$PROFILE"
-    if [[ -f "$ROOT/nix/$PROFILE/profile.nix" && -t 0 && "$ASSUME_YES" == false ]]; then
+    if jq -e --arg profile "$PROFILE" '.profiles | has($profile)' "$config" >/dev/null \
+      && [[ -t 0 && "$ASSUME_YES" == false ]]; then
       printf "Profile '%s' already exists. Use it directly or create a child profile? [use/create] [use]: " "$PROFILE"
       read -r answer
       case "$answer" in
@@ -469,12 +481,14 @@ choose_profile() {
           printf 'New profile name: '
           read -r custom
           validate_name "$custom"
-          [[ ! -e "$ROOT/nix/$custom/profile.nix" ]] || fail "profile already exists: $custom"
+          jq -e --arg profile "$custom" '.profiles | has($profile) | not' "$config" >/dev/null \
+            || fail "profile already exists: $custom"
           printf 'Extend profile [base] (enter development to inherit development tools): '
           read -r parent
           parent="${parent:-base}"
           validate_name "$parent"
-          [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
+          jq -e --arg profile "$parent" '.profiles | has($profile)' "$config" >/dev/null \
+            || fail "parent profile does not exist: $parent"
           PROFILE="$custom"
           EXTENDS="$parent"
           printf "Creating profile '%s' extending '%s'.\n" "$PROFILE" "$EXTENDS"
@@ -484,20 +498,21 @@ choose_profile() {
           ;;
         *) fail "choose 'use' or 'create'" ;;
       esac
-    elif [[ ! -f "$ROOT/nix/$PROFILE/profile.nix" && -t 0 && "$ASSUME_YES" == false ]]; then
+    elif ! jq -e --arg profile "$PROFILE" '.profiles | has($profile)' "$config" >/dev/null \
+      && [[ -t 0 && "$ASSUME_YES" == false ]]; then
       printf "Creating new profile '%s'. Extend profile [base] (enter development to inherit development tools): " "$PROFILE"
       read -r parent
       parent="${parent:-base}"
       validate_name "$parent"
-      [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
+      jq -e --arg profile "$parent" '.profiles | has($profile)' "$config" >/dev/null \
+        || fail "parent profile does not exist: $parent"
       EXTENDS="$parent"
       printf "Creating profile '%s' extending '%s'.\n" "$PROFILE" "$EXTENDS"
     fi
     return
   fi
   if [[ ! -t 0 ]]; then PROFILE=base; return; fi
-  profiles="$(find "$ROOT/nix" -mindepth 2 -maxdepth 2 -name profile.nix -print \
-    | sed -E 's|.*/nix/([^/]+)/profile.nix|\1|' | sort)"
+  profiles="$(jq -r '.profiles | keys[]' "$config")"
   if command -v fzf >/dev/null 2>&1; then
     choice="$(printf '%s\n%s\n' "$profiles" '+ create custom profile' | fzf --prompt='Profile> ' || true)"
   else
@@ -511,12 +526,13 @@ choose_profile() {
       read -r parent
       parent="${parent:-base}"
       validate_name "$parent"
-      [[ -f "$ROOT/nix/$parent/profile.nix" ]] || fail "parent profile does not exist: $parent"
+      jq -e --arg profile "$parent" '.profiles | has($profile)' "$config" >/dev/null \
+        || fail "parent profile does not exist: $parent"
       PROFILE="$custom"
       EXTENDS="$parent"
       ;;
     "") PROFILE=base ;;
-    *) validate_name "$choice"; [[ -f "$ROOT/nix/$choice/profile.nix" ]] || fail "profile does not exist: $choice"; PROFILE="$choice" ;;
+    *) validate_name "$choice"; jq -e --arg profile "$choice" '.profiles | has($profile)' "$config" >/dev/null || fail "profile does not exist: $choice"; PROFILE="$choice" ;;
   esac
 }
 
@@ -536,24 +552,17 @@ scan_secrets() {
 }
 
 ensure_profile() {
-  local file="$ROOT/nix/$PROFILE/profile.nix"
-  [[ -f "$file" ]] && return 0
+  local file="$ROOT/home-weave.json" temporary
+  jq -e --arg profile "$PROFILE" '.profiles | has($profile)' "$file" >/dev/null && return 0
   validate_name "$PROFILE"
   validate_name "$EXTENDS"
-  [[ -f "$ROOT/nix/$EXTENDS/profile.nix" ]] || fail "parent profile does not exist: $EXTENDS"
-  mkdir -p "$ROOT/nix/$PROFILE"
-  cat >"$file" <<EOF
-{
-  extends = "$EXTENDS";
-  shells = [ "zsh" ];
-  primaryShell = "zsh";
-  packageGroups = [ ];
-  nixPackages = [ ];
-  providerPackages = { };
-  homebrewCasks = [ ];
-  allowUnfree = [ ];
-}
-EOF
+  jq -e --arg profile "$EXTENDS" '.profiles | has($profile)' "$file" >/dev/null \
+    || fail "parent profile does not exist: $EXTENDS"
+  temporary="$file.tmp.$$"
+  jq --arg profile "$PROFILE" --arg parent "$EXTENDS" \
+    '.profiles[$profile] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], packages: {nix: []}}' \
+    "$file" >"$temporary"
+  mv "$temporary" "$file"
 }
 
 choose_shell() {
@@ -588,45 +597,46 @@ choose_shell() {
 }
 
 update_profile_shell() {
-  local file="$ROOT/nix/$PROFILE/profile.nix" temporary shell shell_values=""
+  local file="$ROOT/home-weave.json" temporary shell shells_json
   [[ -f "$file" ]] || fail "profile is missing: $PROFILE"
   while IFS= read -r shell; do
     case "$shell" in bash|zsh|fish|nushell) ;; *) fail "unsupported shell: $shell" ;; esac
-    shell_values+=" \"$shell\""
   done <<<"${SELECTED_SHELLS:-$PRIMARY_SHELL}"
+  shells_json="$(printf '%s\n' ${SELECTED_SHELLS:-$PRIMARY_SHELL} | jq -Rsc 'split("\n") | map(select(length > 0)) | unique')"
   temporary="$file.tmp.$$"
-  sed -E \
-    -e "s/shells = \[[^]]*\];/shells = [$shell_values ];/" \
-    -e "s/primaryShell = \"[^\"]*\";/primaryShell = \"$PRIMARY_SHELL\";/" \
-    "$file" >"$temporary"
+  jq --arg profile "$PROFILE" --arg primary "$PRIMARY_SHELL" --argjson shells "$shells_json" \
+    '.profiles[$profile].shells = $shells | .profiles[$profile].primaryShell = $primary' "$file" >"$temporary"
   mv "$temporary" "$file"
 }
 
 add_profile_packages() {
-  local file="$ROOT/nix/$PROFILE/profile.nix" temporary package package_values=""
-  shift 0
+  local file="$ROOT/home-weave.json" temporary package packages_json
   for package in "$@"; do
     [[ "$package" =~ ^[a-zA-Z0-9+_-]+([.][a-zA-Z0-9+_-]+)*$ ]] || fail "unsafe Nix package name: $package"
-    package_values+=" \"$package\""
   done
-  [[ -n "$package_values" ]] || return 0
+  (($# > 0)) || return 0
+  packages_json="$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0))')"
   temporary="$file.tmp.$$"
-  sed -E "s/nixPackages = \[[^]]*\];/nixPackages = [$package_values ];/" "$file" >"$temporary"
+  jq --arg profile "$PROFILE" --argjson packages "$packages_json" \
+    '.profiles[$profile].packages.nix = (((.profiles[$profile].packages.nix // []) + $packages) | unique_by(if type == "string" then . else .name end))' \
+    "$file" >"$temporary"
   mv "$temporary" "$file"
 }
 
 add_profile_groups() {
-  local file="$ROOT/nix/$PROFILE/profile.nix" temporary group group_values=""
+  local file="$ROOT/home-weave.json" temporary group groups_json
   for group in "$@"; do
     case "$group" in
       python|data-jupyter|go|rust|java|web|cloud|desktop) ;;
       *) fail "unknown package group: $group" ;;
     esac
-    group_values+=" \"$group\""
   done
-  [[ -n "$group_values" ]] || return 0
+  (($# > 0)) || return 0
+  groups_json="$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0))')"
   temporary="$file.tmp.$$"
-  sed -E "s/packageGroups = \[[^]]*\];/packageGroups = [$group_values ];/" "$file" >"$temporary"
+  jq --arg profile "$PROFILE" --argjson groups "$groups_json" \
+    '.profiles[$profile].packageGroups = (((.profiles[$profile].packageGroups // []) + $groups) | unique)' \
+    "$file" >"$temporary"
   mv "$temporary" "$file"
 }
 
@@ -705,17 +715,18 @@ select_package_groups() {
 }
 
 add_profile_unfree() {
-  local file="$ROOT/nix/$PROFILE/profile.nix" temporary package_values="" package existing
-  local packages=()
-  existing="$(sed -nE 's/.*allowUnfree = \[([^]]*)\].*/\1/p' "$file" \
-    | grep -oE '"[^"]+"' | tr -d '"' || true)"
-  while IFS= read -r package; do [[ -z "$package" ]] || packages+=("$package"); done <<<"$existing"
-  for package in "$@"; do packages+=("$package"); done
-  while IFS= read -r package; do package_values+=" \"$package\""; done \
-    < <(printf '%s\n' "${packages[@]}" | sed '/^$/d' | sort -u)
-  [[ -n "$package_values" ]] || return 0
+  local file="$ROOT/home-weave.json" temporary packages_json
+  (($# > 0)) || return 0
+  packages_json="$(printf '%s\n' "$@" | jq -Rsc 'split("\n") | map(select(length > 0))')"
   temporary="$file.tmp.$$"
-  sed -E "s/allowUnfree = \[[^]]*\];/allowUnfree = [$package_values ];/" "$file" >"$temporary"
+  jq --arg profile "$PROFILE" --argjson accepted "$packages_json" '
+    (.profiles[$profile].packages.nix // []) as $entries
+    | ($entries | map(if type == "string" then . else .name end)) as $entryNames
+    | .profiles[$profile].packages.nix = ($entries | map(
+      if ((if type == "string" then . else .name end) as $name | $accepted | index($name))
+      then {name: (if type == "string" then . else .name end), allowUnfree: true}
+      else . end))
+    | .profiles[$profile].allowUnfree = (((.profiles[$profile].allowUnfree // []) + ($accepted - $entryNames)) | unique)' "$file" >"$temporary"
   mv "$temporary" "$file"
 }
 
@@ -864,7 +875,7 @@ load_default_package_ids() {
   catalog="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "$BASE_URL#lib.packageCatalog" 2>/dev/null || printf '{}')"
   profiles="$(nix --extra-experimental-features 'nix-command flakes' \
-    eval --json "path:$ROOT#lib.setup.profiles" 2>/dev/null || printf '{}')"
+    eval --json "path:$ROOT#lib.setup.profilesBySystem.\"$(current_nix_system)\"" 2>/dev/null || printf '{}')"
   profile_metadata="$(jq -c --arg profile "$PROFILE" '.[$profile] // {}' <<<"$profiles")"
   development="$(jq -r '.development // false' <<<"$profile_metadata")"
   DEFAULT_PACKAGE_IDS="$(jq -rn \
@@ -1117,8 +1128,8 @@ select_optional_packages() {
     if [[ -z "$pinned" ]] && ! pinned="$(pinned_nixpkgs_ref)"; then
       fail "could not verify selected package licenses against pinned Nixpkgs"
     fi
-    accept_unfree_packages "$pinned" "${package_list[@]}"
     add_profile_packages "${package_list[@]}"
+    accept_unfree_packages "$pinned" "${package_list[@]}"
   fi
 }
 
@@ -1156,12 +1167,26 @@ show_provider_inventory() {
 
 reconcile_profile_providers() {
   local mode="$1" profiles="$2" profile_json provider_packages provider_name provider command removal_policy
-  local inventory item refreshed id display_name state ownership status='[]' inventory_only degraded=false
+  local inventory item refreshed id display_name state ownership status='[]' inventory_only degraded=false native_packages native_selected='[]' os_id
   local pending_file="$ROOT/.state/provider-status.pending.json"
   load_builtin_provider
   profile_json="$(jq -ce --arg profile "$PROFILE" '.[$profile] // empty' <<<"$profiles")" \
     || fail "profile does not exist: $PROFILE"
   provider_packages="$(jq -c '.providerPackages // {}' <<<"$profile_json")"
+  native_packages="$(jq -c '.nativePackages // {}' <<<"$profile_json")"
+  if [[ "$(uname -s)" == Darwin ]]; then
+    native_selected="$(jq -c '.homebrewFormulae // []' <<<"$native_packages")"
+  elif [[ -r /etc/os-release ]]; then
+    os_id="$(. /etc/os-release; printf '%s' "${ID:-}")"
+    case "$os_id" in
+      debian|ubuntu) native_selected="$(jq -c '.apt // []' <<<"$native_packages")" ;;
+      arch) native_selected="$(jq -c '.pacman // []' <<<"$native_packages")" ;;
+    esac
+  fi
+  if (($(jq 'length' <<<"$native_selected") > 0)); then
+    provider_packages="$(jq -cn --argjson providers "$provider_packages" --argjson native "$native_selected" \
+      '$providers + {"native-official": (((($providers["native-official"] // []) + $native) | unique))}')"
+  fi
   [[ "$(jq -r 'type' <<<"$provider_packages")" == object ]] \
     || fail "profile $PROFILE has invalid providerPackages metadata"
   (($(jq 'length' <<<"$provider_packages") > 0)) || {
@@ -1262,11 +1287,11 @@ reconcile_profile_providers() {
 }
 
 show_profile_packages() {
-  local file="$ROOT/nix/$PROFILE/profile.nix"
+  local file="$ROOT/home-weave.json"
   printf '\nProfile configuration: %s\n' "$file"
   printf 'Inherited defaults come from %s and are pinned by flake.lock.\n' "$BASE_URL"
-  sed -n '/nixPackages/,/];/p' "$file"
-  printf 'Add future package attribute names to nixPackages in that file.\n'
+  jq --arg profile "$PROFILE" '.profiles[$profile]' "$file"
+  printf 'Add future packages and dotfile components to this profile in home-weave.json.\n'
 }
 
 scan_dotfiles() {
@@ -1389,7 +1414,7 @@ initialize_git() {
 
 profile_metadata() {
   nix --extra-experimental-features 'nix-command flakes' \
-    eval --json "path:$ROOT#lib.setup.profiles"
+    eval --json "path:$ROOT#lib.setup.profilesBySystem.\"$(current_nix_system)\""
 }
 
 record_receipt() {
@@ -1747,13 +1772,11 @@ profile_command() {
       [[ -n "$name" ]] || fail "profile create requires a name"; validate_name "$name"; validate_name "$EXTENDS"
       [[ -z "$(jq -r --arg name "$name" '.[$name] // empty' <<<"$profiles")" ]] || fail "profile already exists: $name"
       [[ -n "$(jq -r --arg name "$EXTENDS" '.[$name] // empty' <<<"$profiles")" ]] || fail "parent profile does not exist: $EXTENDS"
-      mkdir -p "$ROOT/nix/$name"
-      file="$ROOT/nix/$name/profile.nix"
-      {
-        printf '{\n  extends = "%s";\n' "$EXTENDS"
-        printf '  shells = [ "zsh" ];\n  primaryShell = "zsh";\n'
-        printf '  packageGroups = [ ];\n  nixPackages = [ ];\n  providerPackages = { };\n  homebrewCasks = [ ];\n  allowUnfree = [ ];\n}\n'
-      } >"$file"
+      file="$ROOT/home-weave.json"
+      jq --arg name "$name" --arg parent "$EXTENDS" \
+        '.profiles[$name] = {extends: $parent, shells: ["zsh"], primaryShell: "zsh", packageGroups: [], dotfiles: [], packages: {nix: []}}' \
+        "$file" >"$file.tmp.$$"
+      mv "$file.tmp.$$" "$file"
       printf 'Created profile %s extending %s.\n' "$name" "$EXTENDS"
       ;;
     diff)
@@ -1773,7 +1796,7 @@ profile_command() {
       printf '\npackages:\n'
       jq -nr --argjson old "$old_packages" --argjson new "$new_packages" \
         '(($new - $old)[] | "+ " + .), (($old - $new)[] | "- " + .)' || true
-      for field in packageGroups homebrewCasks allowUnfree shells; do
+      for field in packageGroups dotfiles homebrewFormulae homebrewCasks allowUnfree shells; do
         printf '\n%s:\n' "$field"
         jq -nr --argjson old "$current_json" --argjson new "$target_json" --arg field "$field" '
           (((($new[$field] // []) - ($old[$field] // []))[]) | "+ " + .),
@@ -1787,7 +1810,14 @@ profile_command() {
           (((($old.providerPackages[$provider] // []) - ($new.providerPackages[$provider] // []))[])
             | "- [" + $provider + "] " + .)
       ' || true
-      printf '\nDotfiles: layers are reconciled during switch\n'
+      printf '\nnativePackages:\n'
+      jq -nr --argjson old "$current_json" --argjson new "$target_json" '
+        ["homebrewFormulae", "apt", "pacman"][] as $manager
+        | (((($new.nativePackages[$manager] // []) - ($old.nativePackages[$manager] // []))[])
+            | "+ [" + $manager + "] " + .),
+          (((($old.nativePackages[$manager] // []) - ($new.nativePackages[$manager] // []))[])
+            | "- [" + $manager + "] " + .)
+      ' || true
       ;;
     switch)
       [[ -n "$name" ]] || fail "profile switch requires a name"; validate_name "$name"
@@ -1805,7 +1835,13 @@ profile_command() {
       [[ "$active" != "$name" ]] || fail "active profile $name must first be switched to its parent: $parent"
       children="$(jq -r --arg name "$name" 'to_entries[] | select(.value.extends == $name) | .key' <<<"$profiles")"
       [[ -z "$children" ]] || fail "profile $name still has child profiles: $(paste -sd, <<<"$children")"
-      if "$DRY_RUN"; then printf 'Would delete profile definition %s.\n' "$name"; else rm -rf "$ROOT/nix/$name"; fi
+      if "$DRY_RUN"; then
+        printf 'Would delete profile definition %s.\n' "$name"
+      else
+        file="$ROOT/home-weave.json"
+        jq --arg name "$name" 'del(.profiles[$name])' "$file" >"$file.tmp.$$"
+        mv "$file.tmp.$$" "$file"
+      fi
       ;;
     *) fail "unknown profile command: $action" ;;
   esac
@@ -1818,7 +1854,7 @@ run_profile_setup() {
   read_state
   [[ -f "$ROOT/setup.sh" ]] || fail "$ROOT is not a HomeWeave profile"
   profiles="$(nix --extra-experimental-features 'nix-command flakes' \
-    eval --json "path:$ROOT#lib.setup.profiles" 2>/dev/null || printf '{}')"
+    eval --json "path:$ROOT#lib.setup.profilesBySystem.\"$(current_nix_system)\"" 2>/dev/null || printf '{}')"
   selected_shell="$(jq -r --arg profile "$PROFILE" '.[$profile].primaryShell // empty' <<<"$profiles")"
   [[ -z "$selected_shell" ]] || PRIMARY_SHELL="$selected_shell"
   "$ASSUME_YES" && setup_args+=(--yes)
@@ -2177,7 +2213,12 @@ setup_command() {
   chmod -R u+rwX "$ROOT"
   if [[ -n "$PROFILE_OVERLAY" ]]; then
     [[ -d "$PROFILE_OVERLAY" ]] || fail "profile overlay is unavailable: $PROFILE_OVERLAY"
-    cp -R "$PROFILE_OVERLAY/." "$ROOT/"
+    if [[ -f "$PROFILE_OVERLAY/home-weave.json" ]]; then
+      jq -s '.[0] * .[1]' "$ROOT/home-weave.json" "$PROFILE_OVERLAY/home-weave.json" \
+        >"$ROOT/home-weave.json.tmp.$$"
+      mv "$ROOT/home-weave.json.tmp.$$" "$ROOT/home-weave.json"
+    fi
+    rsync -a --exclude='/home-weave.json' "$PROFILE_OVERLAY/" "$ROOT/"
   fi
   chmod -R u+rwX "$ROOT"
   chmod u+x "$ROOT/home-weave" "$ROOT/setup.sh"
@@ -2203,8 +2244,8 @@ setup_command() {
   done
   if [[ -n "${filtered_packages[*]-}" ]]; then
     pinned="$(pinned_nixpkgs_ref)" || fail "could not verify requested packages against pinned Nixpkgs"
-    accept_unfree_packages "$pinned" "${filtered_packages[@]}"
     add_profile_packages "${filtered_packages[@]}"
+    accept_unfree_packages "$pinned" "${filtered_packages[@]}"
   fi
   select_package_groups
   if [[ -n "${REQUESTED_GROUPS[*]-}" ]]; then
@@ -2298,7 +2339,7 @@ restore_command() {
   done < <(find "$repository" -type l -print)
   schema="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "path:$repository#lib.setup.schemaVersion" 2>/dev/null || true)"
-  [[ "$schema" == 1 || "$schema" == 2 ]] || fail "remote has an unsupported HomeWeave schema"
+  [[ "$schema" == 4 ]] || fail "remote has an unsupported HomeWeave schema"
   RESTORE_MODE="${RESTORE_MODE:-override}"
   if [[ "$RESTORE_MODE" == merge && -d "$ROOT" ]]; then
     old_copy="$staging/local"
@@ -2449,6 +2490,35 @@ extension_command() {
   exec "$command" command "${POSITIONAL_ARGS[@]:1}"
 }
 
+config_command() {
+  local action="${POSITIONAL_ARGS[0]:-show}" name="${POSITIONAL_ARGS[1]:-}" config="$ROOT/home-weave.json"
+  [[ -f "$config" ]] || fail "configuration is missing: $config"
+  require_commands jq nix
+  case "$action" in
+    validate)
+      [[ -r "$CONFIG_SCHEMA" ]] || fail "HomeWeave configuration schema is unavailable: $CONFIG_SCHEMA"
+      command -v check-jsonschema >/dev/null 2>&1 \
+        || fail "check-jsonschema is required to validate home-weave.json"
+      check-jsonschema --schemafile "$CONFIG_SCHEMA" "$config" \
+        || fail "home-weave.json does not satisfy the HomeWeave v2 schema"
+      nix --extra-experimental-features 'nix-command flakes' eval --json \
+        "path:$ROOT#lib.setup.profilesBySystem.\"$(current_nix_system)\"" >/dev/null \
+        || fail "home-weave.json could not be resolved for this system"
+      printf 'Configuration is valid: %s\n' "$config"
+      ;;
+    show)
+      name="${name:-${PROFILE:-$(jq -r '.defaults.profile' "$config")}}"
+      validate_name "$name"
+      jq -e --arg name "$name" '.profiles | has($name)' "$config" >/dev/null \
+        || fail "profile does not exist: $name"
+      jq --arg name "$name" '.profiles[$name]' "$config"
+      printf '\nDotfile placement (GNU Stow layout; target is $HOME):\n'
+      jq -r --arg name "$name" '.profiles[$name].dotfiles[]? | "  dotfiles/\(.)/<home-relative-path> -> ~/<home-relative-path>"' "$config"
+      ;;
+    *) fail "unknown config command: $action (use validate or show)" ;;
+  esac
+}
+
 POSITIONAL_ARGS=()
 parse_common_options "$@"
 [[ "$COMMAND" != uninstall ]] || normalize_uninstall_mode
@@ -2471,6 +2541,7 @@ case "$COMMAND" in
   uninstall) uninstall_command ;;
   profile) profile_command ;;
   status) status_command ;;
+  config) config_command ;;
   logs) logs_command ;;
   snapshot) snapshot_command ;;
   provider) provider_command ;;

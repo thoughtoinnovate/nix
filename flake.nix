@@ -39,6 +39,35 @@
     let
       baseOverlay = import ./overlays/base.nix;
       developmentOverlay = import ./overlays/development.nix;
+      profileConfig = import ./lib/profile-config.nix { lib = nixpkgs.lib; };
+      defaultProfileManifest = builtins.fromJSON (builtins.readFile ./templates/profile/home-weave.json);
+      defaultCoreManifest = defaultProfileManifest // {
+        distribution.name = "home-weave-core";
+        profiles = {
+          base = {
+            extends = null;
+            shells = [ "zsh" ];
+            primaryShell = "zsh";
+            dotfiles = [ "common" "starship" "ghostty" "nvim" "shells" ];
+            packages.nix = [ ];
+          };
+          development = {
+            extends = "base";
+            development = true;
+            packageGroups = [ ];
+            dotfiles = [ ];
+            packages.nix = [ ];
+          };
+        };
+      };
+      defaultResolvedBySystem = nixpkgs.lib.genAttrs
+        [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
+        (system: profileConfig.resolve {
+          config = defaultCoreManifest;
+          sourceRoot = self.outPath;
+          sourceName = "home-weave-core";
+          inherit system;
+        });
       # nixpkgs-unstable's Darwin linker fix landed before its Starship output
       # reached cache.nixos.org. Use the final supported Darwin channel's
       # cache-backed Starship until the unstable output is substituted.
@@ -128,7 +157,7 @@
                 {
                   home = {
                     username = "test-user";
-                    homeDirectory = if pkgs.stdenv.hostPlatform.isDarwin then "/Users/test-user" else "/home/test-user";
+                    homeDirectory = "/tmp/home-weave-test-home";
                     stateVersion = "26.05";
                   };
                   homeWeave = {
@@ -163,8 +192,7 @@
               {
                 home = {
                   username = "test-user";
-                  homeDirectory =
-                    if unfreePkgs.stdenv.hostPlatform.isDarwin then "/Users/test-user" else "/home/test-user";
+                  homeDirectory = "/tmp/home-weave-test-home";
                   stateVersion = "26.05";
                   packages = [ unfreePkgs.claude-code ];
                 };
@@ -178,7 +206,6 @@
             inherit (pkgs)
               terminal-tools
               development-tools
-              full-development-environment
               neovim
               starship
               stow
@@ -188,9 +215,6 @@
 
             home-weave = pkgs.home-weave-cli;
 
-            base = pkgs.terminal-tools;
-            base-devshell = pkgs.development-tools;
-            full-development = pkgs.full-development-environment;
             default = pkgs.development-tools;
           };
 
@@ -236,6 +260,58 @@
           formatter = pkgs.nixfmt;
 
           checks = {
+            profile-config =
+              let
+                fixture = {
+                  schemaVersion = 2;
+                  defaults.profile = "child";
+                  profiles = {
+                    base = {
+                      shells = [ "zsh" ];
+                      primaryShell = "zsh";
+                      dotfiles = [ "common" "nvim" ];
+                      packages.nix = [ "jq" ];
+                      platforms = {
+                        macos.packages = {
+                          nix = [ { name = "claude-code"; allowUnfree = true; } ];
+                          homebrew.formulae = [ "vault" ];
+                          providers.company = [ "approved-app" ];
+                        };
+                        linux.distributions.ubuntu.packages.apt = [ "curl" ];
+                      };
+                    };
+                    child = {
+                      extends = "base";
+                      dotfilesRemove = [ "nvim" ];
+                      dotfiles = [ "work-nvim" ];
+                      packages.nix = [ "ripgrep" ];
+                    };
+                  };
+                };
+                darwin = profileConfig.resolve {
+                  config = fixture;
+                  sourceRoot = ./tests/fixtures;
+                  sourceName = "fixture";
+                  system = "aarch64-darwin";
+                };
+                linux = profileConfig.resolve {
+                  config = fixture;
+                  sourceRoot = ./tests/fixtures;
+                  sourceName = "fixture";
+                  system = "x86_64-linux";
+                };
+              in
+              assert darwin.profiles.child.dotfiles == [ "common" "work-nvim" ];
+              assert darwin.profiles.child.nixPackages == [ "jq" "claude-code" "ripgrep" ];
+              assert darwin.profiles.child.allowUnfree == [ "claude-code" ];
+              assert darwin.profiles.child.nativePackages.homebrewFormulae == [ "vault" ];
+              assert darwin.profiles.child.providerPackages.company == [ "approved-app" ];
+              assert linux.profiles.child.nativePackages.apt == [ "curl" ];
+              pkgs.runCommand "profile-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
+                jq -e . ${./schemas/home-weave-v2.schema.json} >/dev/null
+                touch $out
+              '';
+
             overlay-evaluation =
               assert pkgs ? terminal-tools;
               assert pkgs ? development-tools;
@@ -417,6 +493,17 @@
       };
 
       lib.dotfiles.path = ./dotfiles;
+      lib.profileConfig = profileConfig;
+      lib.profileConfigSchema = ./schemas/home-weave-v2.schema.json;
+      lib.setup = {
+        schemaVersion = 4;
+        namespace = "home-weave";
+        defaults = { profile = "base"; shell = "zsh"; };
+        profilesBySystem = nixpkgs.lib.mapAttrs (_: value: value.profiles) defaultResolvedBySystem;
+        dotfilesBySystem = nixpkgs.lib.mapAttrs (_: value: value.dotfiles) defaultResolvedBySystem;
+        profiles = defaultResolvedBySystem.x86_64-linux.profiles;
+        dotfiles = defaultResolvedBySystem.x86_64-linux.dotfiles;
+      };
       lib.verifiedInstaller = {
         schemaVersion = 1;
         program = ./lib/verified-installer.sh;

@@ -36,15 +36,17 @@ test -x "$ROOT/home-weave"
 test ! -e "$ROOT/.state/active-profile"
 test "$(<"$ROOT/.state/selected-profile")" = work
 test "$(<"$ROOT/.state/primary-shell")" = fish
-grep -Fq 'extends = "development";' "$ROOT/nix/work/profile.nix"
-grep -Fq 'shells = [ "fish" "zsh" ];' "$ROOT/nix/work/profile.nix"
-grep -Fq 'packageGroups = [ "cloud" ];' "$ROOT/nix/work/profile.nix"
-grep -Fq 'nixPackages = [ ];' "$ROOT/nix/work/profile.nix"
-grep -Fq 'providerPackages = { };' "$ROOT/nix/work/profile.nix"
+jq -e '.schemaVersion == 2
+  and .profiles.work.extends == "development"
+  and .profiles.work.shells == ["fish", "zsh"]
+  and .profiles.work.packageGroups == ["cloud"]
+  and .profiles.work.packages.nix == []
+  and .profiles.work.allowUnfree == ["terraform"]' "$ROOT/home-weave.json" >/dev/null
+run_cli config show base | grep -F 'dotfiles/custom/<home-relative-path> -> ~/<home-relative-path>' >/dev/null
 
 # A new named profile inherits base unless --extends selects another parent.
 run_cli setup --yes --no-git --no-apply --profile personal --shell zsh
-grep -Fq 'extends = "base";' "$ROOT/nix/personal/profile.nix"
+jq -e '.profiles.personal.extends == "base"' "$ROOT/home-weave.json" >/dev/null
 
 printf 'old setup\n' >"$ROOT/old-marker"
 run_cli setup --yes --no-git --no-apply --profile base --shell zsh

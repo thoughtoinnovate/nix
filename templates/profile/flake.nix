@@ -3,87 +3,35 @@
 
   inputs = {
     nix-base.url = "github:thoughtoinnovate/nix";
-
     nixpkgs.follows = "nix-base/nixpkgs";
   };
 
   outputs =
-    {
-      self,
-      nix-base,
-      nixpkgs,
-      ...
-    }:
+    { self, nix-base, nixpkgs, ... }:
     let
       lib = nixpkgs.lib;
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-        "x86_64-darwin"
-      ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
-      profileEntries = builtins.readDir ./nix;
-      profileNames = builtins.filter (
-        name: profileEntries.${name} == "directory" && builtins.pathExists (./nix + "/${name}/profile.nix")
-      ) (builtins.attrNames profileEntries);
-      rawProfiles = lib.genAttrs profileNames (name: import (./nix + "/${name}/profile.nix"));
-      emptyProfile = {
-        extends = null;
-        shells = [ "zsh" ];
-        primaryShell = "zsh";
-        packageGroups = [ ];
-        nixPackages = [ ];
-        providerPackages = { };
-        homebrewCasks = [ ];
-        allowUnfree = [ ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ];
+      forAllSystems = lib.genAttrs systems;
+      manifest = builtins.fromJSON (builtins.readFile ./home-weave.json);
+      parentProfiles =
+        if nix-base ? lib && nix-base.lib ? setup && nix-base.lib.setup ? profiles
+        then nix-base.lib.setup.profiles
+        else { };
+      resolvedFor = system: nix-base.lib.profileConfig.resolve {
+        config = manifest;
+        sourceRoot = self.outPath;
+        sourceName = manifest.distribution.name;
+        inherit system parentProfiles;
       };
-      resolveProfile =
-        seen: name:
-        if builtins.elem name seen then
-          throw "HomeWeave profile inheritance cycle: ${lib.concatStringsSep " -> " (seen ++ [ name ])}"
-        else if !(builtins.hasAttr name rawProfiles) then
-          throw "HomeWeave profile does not exist: ${name}"
-        else
-          let
-            current = rawProfiles.${name};
-            parentName = current.extends or null;
-            parent = if parentName == null then emptyProfile else resolveProfile (seen ++ [ name ]) parentName;
-          in
-          parent
-          // current
-          // {
-            nixPackages = lib.unique (parent.nixPackages ++ (current.nixPackages or [ ]));
-            packageGroups = lib.unique (parent.packageGroups ++ (current.packageGroups or [ ]));
-            providerPackages =
-              let
-                currentProviders = current.providerPackages or { };
-                names = lib.unique (
-                  builtins.attrNames parent.providerPackages ++ builtins.attrNames currentProviders
-                );
-              in
-              lib.genAttrs names (
-                provider:
-                lib.unique ((parent.providerPackages.${provider} or [ ]) ++ (currentProviders.${provider} or [ ]))
-              );
-            homebrewCasks = lib.unique (parent.homebrewCasks ++ (current.homebrewCasks or [ ]));
-            allowUnfree = lib.unique (parent.allowUnfree ++ (current.allowUnfree or [ ]));
-            development =
-              (parent.development or false) || name == "development" || (current.development or false);
-          };
-      resolvedProfiles = lib.genAttrs profileNames (resolveProfile [ ]);
-      profileModule =
-        profile:
-        {
-          lib,
-          pkgs,
-          ...
-        }:
+      resolvedBySystem = lib.genAttrs systems resolvedFor;
+      resolved = resolvedBySystem.x86_64-linux;
+      profileModule = name: { lib, pkgs, ... }:
         let
-          packageFor =
-            name: lib.attrByPath (lib.splitString "." name) (throw "Nix package is unavailable: ${name}") pkgs;
-        in
-        {
+          profile = (resolvedFor pkgs.stdenv.hostPlatform.system).profiles.${name};
+          packageFor = packageName:
+            lib.attrByPath (lib.splitString "." packageName)
+              (throw "Nix package is unavailable: ${packageName}") pkgs;
+        in {
           homeWeave.base = {
             enable = true;
             shells = profile.shells;
@@ -91,64 +39,21 @@
           };
           homeWeave.development.enable = profile.development;
           home.packages = map packageFor profile.nixPackages;
+          home.sessionVariables = profile.environment.variables;
         };
-    in
-    {
+    in {
       overlays.default = import ./overlay.nix;
       homeModules.default = import ./home.nix;
-      homeModules.profiles = lib.mapAttrs (_: profileModule) resolvedProfiles;
+      homeModules.profiles = lib.genAttrs (builtins.attrNames resolved.profiles) profileModule;
 
       lib.setup = {
-        schemaVersion = 3;
+        schemaVersion = 4;
         namespace = "home-weave";
-        defaults = {
-          shell = "zsh";
-          profile = "base";
-        };
-        profiles = resolvedProfiles;
-        dotfiles.layers = [
-          {
-            name = "base";
-            source = {
-              kind = "nix";
-              path = "${nix-base.lib.dotfiles.path}";
-            };
-            entries =
-              map
-                (package: {
-                  from = package;
-                  to = ".";
-                  mode = "merge";
-                })
-                [
-                  "common"
-                  "starship"
-                  "ghostty"
-                  "nvim"
-                ]
-              ++ [
-                {
-                  from = "@shells";
-                  to = ".";
-                  mode = "merge";
-                }
-              ];
-          }
-          {
-            name = "custom";
-            source = {
-              kind = "nix";
-              path = "${self.outPath}/dotfiles";
-            };
-            entries = [
-              {
-                from = "custom";
-                to = ".";
-                mode = "merge";
-              }
-            ];
-          }
-        ];
+        defaults = resolved.defaults // { shell = "zsh"; };
+        profiles = resolved.profiles;
+        dotfiles = resolved.dotfiles;
+        profilesBySystem = lib.mapAttrs (_: value: value.profiles) resolvedBySystem;
+        dotfilesBySystem = lib.mapAttrs (_: value: value.dotfiles) resolvedBySystem;
       };
 
       apps = forAllSystems (system: {

@@ -8,6 +8,7 @@ let
     name = "home-weave";
     runtimeInputs = with final; [
       coreutils
+      check-jsonschema
       curl
       diffutils
       fzf
@@ -30,6 +31,7 @@ let
       export HOME_WEAVE_NATIVE_PROVIDER="''${HOME_WEAVE_NATIVE_PROVIDER:-${../lib/native-provider.sh}}"
       export HOME_WEAVE_PREFLIGHT_REPORTER="''${HOME_WEAVE_PREFLIGHT_REPORTER:-${../lib/preflight-report.sh}}"
       export HOME_WEAVE_ENV_RENDERER="''${HOME_WEAVE_ENV_RENDERER:-${../lib/home-weave-env.sh}}"
+      export HOME_WEAVE_CONFIG_SCHEMA="''${HOME_WEAVE_CONFIG_SCHEMA:-${../schemas/home-weave-v2.schema.json}}"
       exec ${final.bash}/bin/bash ${../home-weave.sh} "$@"
     '';
   };
@@ -130,10 +132,6 @@ in
     paths = final.basePackagesWithoutJava;
     inherit pathsToLink;
   };
-
-  # Compatibility aliases retained for existing consumers.
-  base = final.terminal-tools;
-  base-devshell = final.development-tools;
 
   mkBaseDevShell =
     {

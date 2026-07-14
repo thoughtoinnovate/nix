@@ -137,22 +137,20 @@ home-weave setup --profile work --extends development \
 ```
 
 Groups can also be changed later through `packageGroups` in
-`~/.home-weave/nix/<profile>/profile.nix`:
+`~/.home-weave/home-weave.json`:
 
-```nix
-{
-  extends = "development";
-  shells = [ "zsh" ];
-  primaryShell = "zsh";
-  packageGroups = [
-    "python"
-    "go"
-    "cloud"
-  ];
-  nixPackages = [ ];
-  providerPackages = { };
-  homebrewCasks = [ ];
-  allowUnfree = [ "terraform" ];
+```json
+"work": {
+  "extends": "development",
+  "shells": ["zsh"],
+  "primaryShell": "zsh",
+  "packageGroups": ["python", "go", "cloud"],
+  "dotfiles": [],
+  "packages": {
+    "nix": [
+      {"name": "terraform", "allowUnfree": true}
+    ]
+  }
 }
 ```
 
@@ -170,7 +168,7 @@ Available groups are:
 Run `plan` and `apply` again after editing a profile.
 
 Private work distributions can expose reviewed provider applications through
-`providerPackages`, keyed by the provider name. HomeWeave inventories them,
+`platforms.<os>.packages.providers`, keyed by the provider name. HomeWeave inventories them,
 shows the provider plan, and asks before each missing application is installed.
 Provider trust and lifecycle policy are displayed separately from publisher
 verification. Applications from a retain-policy MDM provider remain managed by
@@ -187,6 +185,18 @@ that MDM and are reported as retained during uninstall and nuke.
 
 `profile switch` shows a plan first and records the new profile only after a
 successful activation.
+
+Validate the canonical manifest and inspect its Stow mappings at any time:
+
+```sh
+~/.home-weave/home-weave config validate
+~/.home-weave/home-weave config show work
+```
+
+Dotfiles use the standard GNU Stow package layout. A component mirrors the
+home directory, so `dotfiles/neovim/.config/nvim/init.lua` maps to
+`~/.config/nvim/init.lua`. Select components with a short array such as
+`"dotfiles": ["neovim", "starship"]`; no target registry is needed.
 
 Inspect a profile or safely remove an unused definition:
 
@@ -364,10 +374,11 @@ Repository trust and license freedom are separate. A verified upstream package
 can still have an unfree license. Add only the reviewed package name to the
 selected profile:
 
-```nix
-{
-  nixPackages = [ "claude-code" ];
-  allowUnfree = [ "claude-code" ];
+```json
+"packages": {
+  "nix": [
+    {"name": "claude-code", "allowUnfree": true}
+  ]
 }
 ```
 
@@ -449,7 +460,7 @@ rewrite the Nix database or restart the daemon automatically.
 Type the complete displayed phrase, including the absolute root path:
 
 ```text
-DELETE /Users/name/.home-weave
+DELETE <the absolute HomeWeave root displayed above>
 ```
 
 Confirmation is checked before nuke changes anything. `--yes` cannot bypass

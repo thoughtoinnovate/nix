@@ -1,5 +1,25 @@
 {
-  "schemaVersion": 1,
-  "distribution": "company-home-weave",
-  "base": "git+ssh://git@gitlab.com/company/nix.git"
+  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v2.schema.json",
+  "schemaVersion": 2,
+  "distribution": {
+    "name": "company-home-weave",
+    "parent": "github:thoughtoinnovate/nix"
+  },
+  "defaults": {
+    "profile": "work"
+  },
+  "profiles": {
+    "work": {
+      "extends": "development",
+      "shells": ["zsh"],
+      "primaryShell": "zsh",
+      "packageGroups": [],
+      "dotfiles": [],
+      "packages": {"nix": []},
+      "platforms": {
+        "macos": {"packages": {"providers": {}}},
+        "linux": {"packages": {"providers": {}}}
+      }
+    }
+  }
 }

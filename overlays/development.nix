@@ -109,18 +109,6 @@ in
     else
       final."jdk${toString jdkVersion}";
 
-  # Compatibility shells and the legacy aggregate now follow the lean
-  # development default. Toolchains are selected through package groups.
-  extendedDevPackages = final.leanDevelopmentPackages;
-
-  fullDevBasePackages = final.basePackagesWithoutJava;
-
-  full-development-environment = prev.buildEnv {
-    name = "full-development-environment";
-    paths = final.fullDevBasePackages ++ final.extendedDevPackages;
-    inherit pathsToLink;
-  };
-
   mkDevShell =
     jdkVersion:
     {
@@ -133,7 +121,7 @@ in
     in
     final.mkBaseDevShell {
       jdk = selectedJdk;
-      extraPackages = final.extendedDevPackages ++ extraPackages;
+      extraPackages = final.leanDevelopmentPackages ++ extraPackages;
       inherit shellLabel;
       extraShellHook = ''
         export PATH="${selectedJdk}/bin:$PATH"

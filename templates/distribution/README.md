@@ -2,7 +2,7 @@
 
 This flake extends `github:thoughtoinnovate/nix` without forking it. Change
 `distributionUrl` and `distributionName` in `flake.nix`, add company profiles
-under `profile-overlay/nix`, then register versioned software providers in the
+to `profile-overlay/home-weave.json`, then register versioned software providers in the
 `providers` list.
 
 An extension manifest uses schema version 1, an executable store path, and a
@@ -16,10 +16,10 @@ Provider inventory/search items may declare `publisher` and
 provider has actually verified the vendor identity; HomeWeave never infers
 official status from a package name.
 
-Employees authenticate to GitLab over SSH and run:
+Users authenticate to their private Git host and run:
 
 ```sh
-nix run 'git+ssh://git@gitlab.com/company/nix.git#home-weave' -- setup
+nix run 'git+ssh://git@example.org/owner/home-weave-distribution.git#home-weave' -- setup
 ```
 
 Keep credentials and secrets outside this repository.

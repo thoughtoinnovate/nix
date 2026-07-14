@@ -26,7 +26,7 @@ Options:
   --help             Show this help
 
 Example:
-  ./bootstrap.sh --config-url https://gitlab.com/alice/system-profile.git -- --shell fish
+  ./bootstrap.sh --config-url https://example.org/owner/home-weave-profile.git -- --shell fish
 EOF
 }
 

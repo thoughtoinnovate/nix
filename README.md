@@ -33,9 +33,55 @@ adopts or records that secrets file; see the quick-start guide for usage.
   and shfmt.
 - opt-in groups: `python`, `data-jupyter`, `go`, `rust`, `java`, `web`,
   `cloud`, and `desktop`. Profiles merge inherited `packageGroups` and
-  `nixPackages` uniquely.
+  `packages.nix` uniquely.
 - `darwin`: nix-darwin integration and optional Homebrew installation of the
   Ghostty macOS application.
+
+`home-weave.json` is the only user-facing profile source. Common Nix packages
+and dotfiles stay at profile level; native package managers and reviewed
+providers are explicit under the target platform:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v2.schema.json",
+  "schemaVersion": 2,
+  "distribution": {"name": "my-home-weave"},
+  "defaults": {"profile": "work"},
+  "profiles": {
+    "work": {
+      "extends": "development",
+      "shells": ["fish", "zsh"],
+      "primaryShell": "fish",
+      "dotfiles": ["neovim", "starship"],
+      "packages": {"nix": ["jq", "vault"]},
+      "platforms": {
+        "macos": {
+          "packages": {
+            "homebrew": {"formulae": ["example"], "casks": []},
+            "providers": {"company-self-service": ["approved-app"]}
+          }
+        },
+        "linux": {
+          "distributions": {
+            "ubuntu": {"packages": {"apt": ["example"]}},
+            "arch": {"packages": {"pacman": ["example"]}}
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Each package has exactly one declared source; HomeWeave never silently falls
+back to another manager or raw installer. URL-based software belongs in a
+reviewed provider that owns its URL, hash/signature checks, receipt, and
+removal policy—not directly in this manifest.
+
+Dotfiles use native GNU Stow package structure. For example,
+`dotfiles/neovim/.config/nvim/init.lua` maps to
+`~/.config/nvim/init.lua`. The profile only names `"neovim"`; HomeWeave
+composes inherited components and uses `$HOME` as the Stow target.
 
 On macOS, Ghostty can be selected explicitly from the official Homebrew cask;
 the nix-darwin module can manage the same cask declaratively. Linux users may
@@ -66,7 +112,7 @@ The command creates one user-owned, private Git repository:
 ```text
 ~/.home-weave/
 ├── flake.nix and flake.lock
-├── nix/<profile>/profile.nix
+├── home-weave.json          # canonical profiles, packages, platforms, dotfiles
 ├── dotfiles/custom/<home-relative-path>
 ├── .state/                 # generated and Git-ignored
 └── backup/<timestamp>/     # local and Git-ignored
@@ -115,7 +161,7 @@ across searches and are shown in one final provenance table for confirmation
 before the profile is changed. Packages already supplied by the selected
 profile (including inherited base/development defaults and selected shells)
 are identified as already included, omitted from the selector, and are not
-written to `nixPackages` again.
+written to `packages.nix` again.
 
 Build without activation, apply, update inputs, restore, or synchronize Git:
 
@@ -134,7 +180,7 @@ home-weave logs
 home-weave logs --latest --tail 100
 home-weave snapshot create ~/home-weave-snapshot
 home-weave snapshot restore ~/home-weave-snapshot --root ~/.home-weave-restored
-home-weave restore git@gitlab.com:group/my-home-weave.git
+home-weave restore git@example.org:owner/home-weave-profile.git
 home-weave sync
 home-weave uninstall
 ```
@@ -162,8 +208,8 @@ Receipts under `.state/receipts/` record packages, applications, dotfiles,
 changes, cache/build decisions, and rollback generations; `latest` references
 the most recent successful activation.
 
-`install.sh` remains the compatibility activation backend. New users should use
-the `home-weave` command.
+`install.sh` is the internal activation backend. Users should use the
+`home-weave` command.
 
 `home-weave uninstall`, `uninstall --profile NAME`, `uninstall --all`, and
 `uninstall --nuke` can remove the Home Manager environment, unlink only
@@ -192,7 +238,7 @@ Change `distributionUrl` in the generated flake, add company profiles under
 GitLab SSH authentication can then run:
 
 ```sh
-nix run 'git+ssh://git@gitlab.com/company/nix.git#home-weave' -- setup
+nix run 'git+ssh://git@example.org/owner/home-weave-distribution.git#home-weave' -- setup
 ```
 
 The work edition pins this public core, supplies work profiles and extensions,
@@ -386,8 +432,7 @@ applications.
 - Keep organization-only packages and settings in a private downstream repo.
 - Use only reviewed overlays, flake inputs, Homebrew taps, and binary caches.
 
-## Existing consumers
+## Lifecycle
 
-Compatibility package names such as `base`, `base-devshell`,
-`terminal-tools`, and `development-tools` remain available. The installer
+The supported package outputs are `terminal-tools` and `development-tools`. The installer
 automates safe Stow linking from public and private configuration components.

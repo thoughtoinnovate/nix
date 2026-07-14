@@ -1,5 +1,29 @@
 {
-  "schemaVersion": 1,
-  "distribution": "personal",
-  "base": "github:thoughtoinnovate/nix"
+  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v2.schema.json",
+  "schemaVersion": 2,
+  "distribution": {
+    "name": "personal"
+  },
+  "defaults": {
+    "profile": "base"
+  },
+  "profiles": {
+    "base": {
+      "extends": "base",
+      "shells": ["zsh"],
+      "primaryShell": "zsh",
+      "dotfiles": ["custom"],
+      "packages": {
+        "nix": []
+      }
+    },
+    "development": {
+      "extends": "development",
+      "packageGroups": [],
+      "dotfiles": ["custom"],
+      "packages": {
+        "nix": []
+      }
+    }
+  }
 }

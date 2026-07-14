@@ -4,8 +4,8 @@ For setup, planning, profile management, updates, and uninstall examples, see
 the public [HomeWeave quick-start guide](https://github.com/thoughtoinnovate/nix/blob/main/QUICKSTART.md).
 
 This private repository extends HomeWeave from `thoughtoinnovate/nix` (or a
-private work distribution) and its sanitized defaults. Named profiles live at
-`nix/<name>/profile.nix`; personal dotfiles live under `dotfiles/custom`.
+private work distribution) and its sanitized defaults. `home-weave.json` is
+the canonical package, platform, profile, environment, and dotfile manifest.
 
 Put personal, non-secret files under `dotfiles/custom` using their final home
 paths, for example `dotfiles/custom/.config/git/config`. The included
@@ -14,7 +14,7 @@ the home directory. Keep credentials in local credential stores or a secret
 manager even when the profile repository is private.
 
 Use `home-weave plan` to build safely and `home-weave apply` to activate. The
-compatibility wrapper `./setup.sh` also restores the profile on Linux or Apple
+activation wrapper `./setup.sh` also restores the profile on Linux or Apple
 Silicon macOS.
 
 Before activation installs the global command, use the repository-local
@@ -25,8 +25,8 @@ launcher, which supplies the required Nix feature flags automatically:
 ./home-weave apply
 ```
 
-`./setup.sh plan` and `./setup.sh apply` delegate to the same launcher for
-compatibility. Execute these scripts directly; do not prefix them with `sh`,
+`./setup.sh plan` and `./setup.sh apply` delegate to the same launcher.
+Execute these scripts directly; do not prefix them with `sh`,
 because they require Bash.
 
 To preview or remove the managed environment safely:
@@ -41,19 +41,26 @@ explicitly selected. It never removes Nix itself.
 Credentials must remain outside this repository and the Nix store.
 
 The active machine selection is stored under the Git-ignored `.state`
-directory. Add packages, shells, casks, and unfree allow-list entries to the
-selected `profile.nix`. Custom profiles may extend any existing profile and
+directory. Add packages, shells, platform packages, and dotfile component names
+to the selected profile in `home-weave.json`. Custom profiles may extend any existing profile and
 select `packageGroups` from `python`, `data-jupyter`, `go`, `rust`, `java`,
 `web`, `cloud`, and `desktop`.
 
-Schema 3 profiles may also declare provider-owned applications. The key must
+Profiles may also declare provider-owned applications under their operating
+system. The key must
 match a provider registered by the distribution; package IDs are inherited and
 deduplicated just like Nix packages and groups:
 
-```nix
-providerPackages = {
-  company-self-service = [ "approved-editor" "approved-vpn" ];
-};
+```json
+"platforms": {
+  "macos": {
+    "packages": {
+      "providers": {
+        "company-self-service": ["approved-editor", "approved-vpn"]
+      }
+    }
+  }
+}
 ```
 
 HomeWeave never substitutes a different provider when the declared provider is
@@ -75,34 +82,21 @@ then make another existing profile active:
 Only a successful `apply` changes `.state/active-profile`; `plan` is read-only.
 The selected profile's own `primaryShell` is used during activation.
 
-## Private work components
+## Dotfile components
 
-Ordered components can come from pinned Nix inputs, local profile paths, or
-exact private Git commits. Append a layer like this after `base` to replace
-only Neovim while retaining public shell, Starship, and Ghostty files:
+HomeWeave follows the normal GNU Stow package layout. Every first-level
+directory under `dotfiles/` is a component and everything below it mirrors
+`$HOME`:
 
-```nix
-{
-  name = "work-nvim";
-  source = {
-    kind = "git";
-    url = "git@gitlab.com:company/work-nvim.git";
-    rev = "0123456789abcdef0123456789abcdef01234567";
-  };
-  entries = [
-    {
-      from = ".";
-      to = ".config/nvim";
-      mode = "replace";
-    }
-  ];
-}
+```text
+dotfiles/neovim/.config/nvim/init.lua -> ~/.config/nvim/init.lua
 ```
 
-Use `mode = "merge"` for partial overrides. Git content is cloned under the
-framework data directory instead of being copied into the Nix store.
-Authenticate to GitLab before setup. Private settings are supported, but
-credentials and secret values must remain in local secret stores.
+Select it with `"dotfiles": ["neovim"]`. Child profiles inherit components,
+add new names uniquely, and can use `dotfilesRemove` for an intentional
+replacement. HomeWeave composes the generation and invokes Stow with `$HOME`
+as its target and `--no-folding`. Credentials and secret values must remain in
+local secret stores.
 
 Desktop applications normally do not load interactive shell configuration.
 Give GUI tools such as Claude Desktop an explicit Nix executable path (or a
