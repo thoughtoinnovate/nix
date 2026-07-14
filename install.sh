@@ -517,7 +517,10 @@ EOF
 
 mv "$TEMP_FLAKE" "$TARGET_FLAKE"
 
-nix "${NIX_FLAGS[@]}" flake lock "$CONFIG_FLAKE"
+# This lock is derived state, not a user-maintained pin. Recreate it so a
+# freshly updated profile lock cannot be shadowed by transitive revisions from
+# the previous plan/apply run.
+nix "${NIX_FLAGS[@]}" flake update --flake "$CONFIG_FLAKE"
 
 preflight_activation() {
   local output_file data_root output download_size closure_size local_builds substitutions reporter reporter_status=0 local_build_count=0 substitution_count=0 unfree_name=""

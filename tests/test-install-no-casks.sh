@@ -16,8 +16,8 @@ grep -Fq 'CONFIG_FLAKE="path:$CONFIG_DIR"' "$installer" || {
   printf 'generated flake is not forced to an explicit path reference\n' >&2
   exit 1
 }
-grep -Fq 'flake lock "$CONFIG_FLAKE"' "$installer" || {
-  printf 'generated flake lock does not use the explicit path reference\n' >&2
+grep -Fq 'flake update --flake "$CONFIG_FLAKE"' "$installer" || {
+  printf 'generated flake lock is not recreated from the current explicit path reference\n' >&2
   exit 1
 }
 if grep -Eq '\$CONFIG_DIR#|flake lock "\$CONFIG_DIR"|switch --flake "\$CONFIG_DIR' "$installer"; then
