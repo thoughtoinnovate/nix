@@ -225,6 +225,69 @@ grep -Fq 'apply apply --action install managed' "$provider_log"
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension list | grep -Fxq fake
 HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli extension fake status | grep -Fq 'command command status'
 
+# Best-effort providers warn for missing and failed items, continue planning
+# later items, and leave strict/security validation unchanged.
+best_effort_provider="$TEST_ROOT/best-effort-provider"
+best_effort_log="$TEST_ROOT/best-effort-provider.log"
+cat >"$best_effort_provider" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+case "$1" in
+  inventory)
+    if [[ "${BEST_EFFORT_UNVERIFIED:-0}" == 1 ]]; then
+      printf '%s\n' '{"schemaVersion":1,"items":[{"id":"good","name":"Good App","installed":true,"publisherVerified":false}]}'
+    else
+      printf '%s\n' '{"schemaVersion":1,"items":[
+        {"id":"bad-plan","name":"Bad Plan","installed":false,"publisherVerified":true},
+        {"id":"good","name":"Good App","installed":false,"publisherVerified":true}]}'
+    fi
+    ;;
+  plan)
+    printf '%s\n' "$*" >>"$BEST_EFFORT_LOG"
+    [[ "$*" != *'bad-plan'* ]]
+    ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$best_effort_provider"
+best_effort_manifest="$(jq -cn --arg executable "$best_effort_provider" '[{
+  schemaVersion: 2,
+  name: "optional",
+  executable: $executable,
+  removalPolicy: "retain",
+  failurePolicy: "best-effort",
+  requirePublisherVerification: true,
+  platforms: ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"],
+  capabilities: ["inventory", "install"]
+}]')"
+mkdir -p "$TEST_ROOT/best-effort-bin"
+cat >"$TEST_ROOT/best-effort-bin/nix" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *lib.setup.profiles* ]]; then
+  printf '%s\n' '{"work":{"extends":"development","primaryShell":"fish","providerPackages":{"optional":["missing","bad-plan","good"]},"nativePackages":{}}}'
+else
+  exit 1
+fi
+EOF
+chmod +x "$TEST_ROOT/best-effort-bin/nix"
+cp "$ROOT/setup.sh" "$TEST_ROOT/setup.sh.before-best-effort"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT/setup.sh"
+chmod +x "$ROOT/setup.sh"
+best_effort_output="$(PATH="$TEST_ROOT/best-effort-bin:$PATH" \
+  BEST_EFFORT_LOG="$best_effort_log" HOME_WEAVE_EXTENSIONS_JSON="$best_effort_manifest" \
+  run_cli plan --profile work --yes 2>&1)"
+grep -Fq 'does not expose missing; skipped it' <<<"$best_effort_output"
+grep -Fq 'could not plan installation of bad-plan; skipped it' <<<"$best_effort_output"
+grep -Fq 'provider reconciliation is degraded' <<<"$best_effort_output"
+grep -Fq 'plan --action install good' "$best_effort_log"
+if PATH="$TEST_ROOT/best-effort-bin:$PATH" BEST_EFFORT_UNVERIFIED=1 \
+  BEST_EFFORT_LOG="$best_effort_log" HOME_WEAVE_EXTENSIONS_JSON="$best_effort_manifest" \
+  run_cli plan --profile work --yes >/dev/null 2>&1; then
+  printf 'best-effort provider incorrectly ignored required publisher verification\n' >&2
+  exit 1
+fi
+cp "$TEST_ROOT/setup.sh.before-best-effort" "$ROOT/setup.sh"
+
 PROVIDER_SNAPSHOT="$TEST_HOME/provider-snapshot"
 PATH="$snapshot_bin:$PATH" HOME_WEAVE_EXTENSIONS_JSON="$manifest" run_cli snapshot create "$PROVIDER_SNAPSHOT"
 jq -e '.providerSnapshots.fake.selectedPackages == ["managed"]' "$PROVIDER_SNAPSHOT/snapshot.json" >/dev/null

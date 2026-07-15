@@ -263,6 +263,15 @@ remove operations with a displayed plan and explicit confirmation. Enterprise
 MDM implementations and catalogs belong only in private repositories; the
 public core contains only the generic provider interface.
 
+Provider manifests may set `failurePolicy = "best-effort"` for optional
+software whose operational failures must not block the remaining profile.
+Missing items and plan/install failures are recorded as degraded warnings and
+retried on a later plan or apply. The default is `strict`. Invalid manifests,
+unsafe identifiers, malformed or ambiguous inventory, and required publisher
+verification failures always remain fatal. Set
+`requirePublisherVerification = true` when every installed item from that
+provider must retain verified publisher evidence.
+
 Child flakes call `lib.mkHomeWeaveDistribution`. The constructor resolves
 parent profiles, creates system-captured Home Manager modules, inherits parent
 adapters, and exports the standard apps and checks. Exact vendor archives can

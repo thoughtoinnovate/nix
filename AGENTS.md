@@ -36,6 +36,12 @@ Third-party Homebrew taps, AUR, third-party APT repositories, unsigned vendor
 installers, and unreviewed binary caches are not trusted defaults. Unfree
 packages require an explicit package-scoped allow-list after license review.
 
+Provider reconciliation is strict by default. Private extensions may opt into
+the generic `best-effort` failure policy for optional operational failures, but
+unsafe identifiers, malformed or ambiguous inventory, and required publisher
+verification failures must remain fatal. Keep organization-specific provider
+names, catalogs, and policy selections out of this repository.
+
 ## Public-data safety
 
 Never commit usernames, home paths, hostnames, organization names, internal

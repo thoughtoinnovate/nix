@@ -1288,7 +1288,8 @@ select_provider_packages() {
 
 reconcile_profile_providers() {
   local mode="$1" profiles="$2" profile_json provider_packages provider_name provider command removal_policy
-  local inventory item refreshed id display_name state ownership status='[]' inventory_only degraded=false native_packages native_selected='[]' os_id
+  local failure_policy require_publisher_verification inventory item refreshed id display_name state ownership
+  local status='[]' inventory_only degraded=false native_packages native_selected='[]' os_id item_count plan_ok install_status
   local pending_file="$ROOT/.state/provider-status.pending.json"
   load_builtin_provider
   profile_json="$(jq -ce --arg profile "$PROFILE" '.[$profile] // empty' <<<"$profiles")" \
@@ -1323,14 +1324,46 @@ reconcile_profile_providers() {
   while IFS= read -r provider_name; do
     provider="$(jq -c --arg name "$provider_name" '.[] | select(.name == $name)' <<<"$EXTENSIONS_JSON")"
     [[ -n "$provider" ]] || fail "profile $PROFILE requires unavailable provider: $provider_name"
-    jq -e '.schemaVersion == 2 and (.capabilities | index("inventory")) and (.capabilities | index("install"))' \
+    jq -e '.schemaVersion == 2 and (.capabilities | index("inventory")) and (.capabilities | index("install"))
+      and ((.failurePolicy // "strict") | IN("strict", "best-effort"))
+      and ((.requirePublisherVerification // false) | type == "boolean")' \
       >/dev/null <<<"$provider" || fail "provider $provider_name cannot reconcile profile applications"
     command="$(jq -r '.executable' <<<"$provider")"
-    [[ -x "$command" ]] || fail "provider executable is unavailable: $command"
     removal_policy="$(jq -r '.removalPolicy // "remove"' <<<"$provider")"
+    failure_policy="$(jq -r '.failurePolicy // "strict"' <<<"$provider")"
+    require_publisher_verification="$(jq -r '.requirePublisherVerification // false' <<<"$provider")"
     [[ "$removal_policy" == remove || "$removal_policy" == retain ]] \
       || fail "provider $provider_name has invalid removalPolicy"
-    inventory="$($command inventory)" || fail "provider inventory failed: $provider_name"
+    if [[ ! -x "$command" ]]; then
+      [[ "$failure_policy" == best-effort ]] || fail "provider executable is unavailable: $command"
+      degraded=true
+      while IFS= read -r id; do
+        [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider package id: $id"
+        warn "provider $provider_name is unavailable; skipped $id and will retry it later"
+        item="$(jq -cn --arg id "$id" '{id: $id, name: $id, installed: false}')"
+        status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+          --arg provider "$provider_name" --arg removalPolicy "$removal_policy" '
+            $items + [($item + {provider: $provider, requested: true, state: "provider-unavailable",
+              ownership: "none", removalPolicy: $removalPolicy})]
+          ')"
+      done < <(jq -r --arg provider "$provider_name" '.[$provider][]' <<<"$provider_packages")
+      continue
+    fi
+    if ! inventory="$($command inventory)"; then
+      [[ "$failure_policy" == best-effort ]] || fail "provider inventory failed: $provider_name"
+      degraded=true
+      while IFS= read -r id; do
+        [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider package id: $id"
+        warn "provider $provider_name inventory failed; skipped $id and will retry it later"
+        item="$(jq -cn --arg id "$id" '{id: $id, name: $id, installed: false}')"
+        status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+          --arg provider "$provider_name" --arg removalPolicy "$removal_policy" '
+            $items + [($item + {provider: $provider, requested: true, state: "provider-unavailable",
+              ownership: "none", removalPolicy: $removalPolicy})]
+          ')"
+      done < <(jq -r --arg provider "$provider_name" '.[$provider][]' <<<"$provider_packages")
+      continue
+    fi
     jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$inventory" \
       || fail "provider $provider_name returned invalid inventory"
 
@@ -1347,14 +1380,38 @@ reconcile_profile_providers() {
       perform_install=false
       replace_existing=false
       [[ "$id" =~ ^[a-zA-Z0-9][a-zA-Z0-9._+-]*$ ]] || fail "unsafe provider package id: $id"
-      [[ "$(jq --arg id "$id" '[.items[] | select(.id == $id)] | length' <<<"$inventory")" == 1 ]] \
-        || fail "provider $provider_name must expose exactly one inventory item for $id"
+      item_count="$(jq --arg id "$id" '[.items[] | select(.id == $id)] | length' <<<"$inventory")"
+      if [[ "$item_count" == 0 && "$failure_policy" == best-effort ]]; then
+        degraded=true
+        warn "provider $provider_name does not expose $id; skipped it and will retry it later"
+        item="$(jq -cn --arg id "$id" '{id: $id, name: $id, installed: false}')"
+        state=unavailable
+        ownership=none
+        status="$(jq -cn --argjson items "$status" --argjson item "$item" \
+          --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
+          --arg removalPolicy "$removal_policy" '
+            $items + [($item + {provider: $provider, requested: true, state: $state,
+              ownership: $ownership, removalPolicy: $removalPolicy})]
+          ')"
+        continue
+      fi
+      [[ "$item_count" == 1 ]] || fail "provider $provider_name must expose exactly one inventory item for $id"
       item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$inventory")"
       display_name="$(jq -r '.name // .id' <<<"$item")"
+      if [[ "$(jq -r '.installed // false' <<<"$item")" == true \
+        && "$require_publisher_verification" == true \
+        && "$(jq -r '.publisherVerified // false' <<<"$item")" != true ]]; then
+        fail "provider $provider_name reported an unverified publisher for installed item $id"
+      fi
       if [[ "$(jq -r '.preexistingCommand // false' <<<"$item")" == true ]]; then
-        "$command" plan --action install "$id" \
-          || fail "provider $provider_name could not plan replacement of $id"
-        if [[ "$mode" == plan ]]; then
+        plan_ok=true
+        "$command" plan --action install "$id" || plan_ok=false
+        if ! "$plan_ok" && [[ "$failure_policy" == best-effort ]]; then
+          state=plan-failed; ownership=none; degraded=true
+          warn "provider $provider_name could not plan replacement of $id; skipped it and will retry it later"
+        elif ! "$plan_ok"; then
+          fail "provider $provider_name could not plan replacement of $id"
+        elif [[ "$mode" == plan ]]; then
           state=planned-replacement
           ownership=none
         elif confirm "Replace the existing $display_name command through $provider_name (the original will be preserved)?"; then
@@ -1368,9 +1425,14 @@ reconcile_profile_providers() {
             "$provider_name" "$display_name"
         fi
       elif [[ "$(jq -r '.conflict // false' <<<"$item")" == true ]]; then
-        "$command" plan --action install "$id" \
-          || fail "provider $provider_name could not plan replacement of $id"
-        if [[ "$mode" == plan ]]; then
+        plan_ok=true
+        "$command" plan --action install "$id" || plan_ok=false
+        if ! "$plan_ok" && [[ "$failure_policy" == best-effort ]]; then
+          state=plan-failed; ownership=none; degraded=true
+          warn "provider $provider_name could not plan replacement of $id; skipped it and will retry it later"
+        elif ! "$plan_ok"; then
+          fail "provider $provider_name could not plan replacement of $id"
+        elif [[ "$mode" == plan ]]; then
           state=planned-replacement
           ownership=none
         elif confirm "Replace the conflicting $display_name destination through $provider_name (the original will be preserved)?"; then
@@ -1388,9 +1450,14 @@ reconcile_profile_providers() {
         ownership=provider
         printf '  [%-18s] %-24s already installed\n' "$provider_name" "$display_name"
       else
-        "$command" plan --action install "$id" \
-          || fail "provider $provider_name could not plan installation of $id"
-        if [[ "$mode" == plan ]]; then
+        plan_ok=true
+        "$command" plan --action install "$id" || plan_ok=false
+        if ! "$plan_ok" && [[ "$failure_policy" == best-effort ]]; then
+          state=plan-failed; ownership=none; degraded=true
+          warn "provider $provider_name could not plan installation of $id; skipped it and will retry it later"
+        elif ! "$plan_ok"; then
+          fail "provider $provider_name could not plan installation of $id"
+        elif [[ "$mode" == plan ]]; then
           state=planned
           ownership=none
         elif confirm "Install $display_name through $provider_name?"; then
@@ -1403,39 +1470,49 @@ reconcile_profile_providers() {
         fi
       fi
       if "$perform_install"; then
-        unset install_status
+        install_status=0
         if "$replace_existing"; then
           HOME_WEAVE_VERIFIED_REPLACE_EXISTING=1 "$command" apply --action install "$id" \
             || install_status=$?
         else
           "$command" apply --action install "$id" || install_status=$?
         fi
-        if [[ "${install_status:-0}" != 0 ]]; then
-          state=failed
+        if [[ "$install_status" != 0 && "$failure_policy" == best-effort ]]; then
+          state=install-failed
           ownership=provider
-          status="$(jq -cn --argjson items "$status" --argjson item "$item" \
-            --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
-            --arg removalPolicy "$removal_policy" '
-              $items + [($item + {provider: $provider, requested: true, state: $state,
-                ownership: $ownership, removalPolicy: $removalPolicy})]
-            ')"
-          mkdir -p "$ROOT/.state"
-          jq -n --arg profile "$PROFILE" --argjson items "$status" \
-            '{schemaVersion: 1, profile: $profile, complete: false, degraded: true, items: $items}' \
-            >"$pending_file"
+          degraded=true
+          warn "provider $provider_name failed to install $id; continuing and will retry it later"
+        elif [[ "$install_status" != 0 ]]; then
           fail "provider $provider_name failed to install $id"
+        else
+          refreshed="$($command inventory)" || fail "provider inventory failed after installing $id"
+          jq -e '.schemaVersion == 1 and (.items | type == "array")' >/dev/null <<<"$refreshed" \
+            || fail "provider $provider_name returned invalid inventory after installing $id"
+          item_count="$(jq --arg id "$id" '[.items[] | select(.id == $id)] | length' <<<"$refreshed")"
+          [[ "$item_count" -le 1 ]] || fail "provider $provider_name returned ambiguous inventory for $id"
+          if [[ "$item_count" == 0 || "$(jq -r --arg id "$id" '.items[] | select(.id == $id) | .installed // false' <<<"$refreshed")" != true ]]; then
+            if [[ "$failure_policy" == best-effort ]]; then
+              state=not-detected
+              ownership=provider
+              degraded=true
+              warn "provider $provider_name did not detect $id after installation; continuing and will retry it later"
+            else
+              fail "provider $provider_name did not verify $id after installation"
+            fi
+          else
+            item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$refreshed")"
+            if [[ "$require_publisher_verification" == true \
+              && "$(jq -r '.publisherVerified // false' <<<"$item")" != true ]]; then
+              fail "provider $provider_name reported an unverified publisher after installing $id"
+            fi
+            if "$replace_existing" && [[ "$(jq -r '.publisherVerified // false' <<<"$item")" != true ]]; then
+              fail "provider $provider_name did not verify the replacement for $id"
+            fi
+            inventory="$refreshed"
+            state=installed
+            ownership=home-weave
+          fi
         fi
-        unset install_status
-        refreshed="$($command inventory)" || fail "provider inventory failed after installing $id"
-        item="$(jq -c --arg id "$id" '.items[] | select(.id == $id)' <<<"$refreshed")"
-        [[ "$(jq -r '.installed // false' <<<"$item")" == true ]] \
-          || fail "provider $provider_name did not verify $id after installation"
-        if "$replace_existing" && [[ "$(jq -r '.publisherVerified // false' <<<"$item")" != true ]]; then
-          fail "provider $provider_name did not verify the replacement for $id"
-        fi
-        inventory="$refreshed"
-        state=installed
-        ownership=home-weave
       fi
       status="$(jq -cn --argjson items "$status" --argjson item "$item" \
         --arg provider "$provider_name" --arg state "$state" --arg ownership "$ownership" \
@@ -1445,6 +1522,10 @@ reconcile_profile_providers() {
         ')"
     done < <(jq -r --arg provider "$provider_name" '.[$provider][]' <<<"$provider_packages")
   done < <(jq -r 'keys[]' <<<"$provider_packages")
+
+  if "$degraded"; then
+    warn "provider reconciliation is degraded; unresolved applications will be retried on the next plan or apply"
+  fi
 
   if [[ "$mode" == apply ]]; then
     mkdir -p "$ROOT/.state"
