@@ -1,0 +1,49 @@
+name: Full builds
+
+on:
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-build:
+    name: Full build (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - runner: macos-15
+            system: aarch64-darwin
+          - runner: macos-15-intel
+            system: x86_64-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install pinned Nix
+        run: bash tests/ci/install-nix.sh
+      - name: Run all native checks
+        run: nix flake check path:. --no-write-lock-file
+      - name: Build complete package environments
+        run: |
+          nix build \
+            path:.#home-weave-environment-base \
+            path:.#home-weave-environment-development \
+            --no-link --no-write-lock-file
+      - name: Verify checkout remains clean
+        if: always()
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"

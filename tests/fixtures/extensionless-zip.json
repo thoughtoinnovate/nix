@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "policy-test": {
+      "kind": "archive",
+      "version": "1",
+      "officialHosts": ["official.invalid"],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://official.invalid/download/tool",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "format": "zip",
+          "install": {"kind": "copy-tree"}
+        },
+        "x86_64-darwin": {
+          "url": "https://official.invalid/download/tool",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "format": "zip",
+          "install": {"kind": "copy-tree"}
+        },
+        "aarch64-linux": {
+          "url": "https://official.invalid/download/tool",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "format": "zip",
+          "install": {"kind": "copy-tree"}
+        },
+        "x86_64-linux": {
+          "url": "https://official.invalid/download/tool",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "format": "zip",
+          "install": {"kind": "copy-tree"}
+        }
+      }
+    }
+  }
+}

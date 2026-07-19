@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v4.schema.json",
+  "title": "HomeWeave configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "distribution", "defaults", "profiles"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 4 },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "parent": { "type": "string", "minLength": 1 }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/profile" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+    },
+    "nixName": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+_-]+(\\.[A-Za-z0-9+_-]+)*$"
+    },
+    "nixPackage": {
+      "oneOf": [
+        { "$ref": "#/$defs/nixName" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nixName" },
+            "allowUnfree": { "type": "boolean", "default": false },
+            "unfreeName": { "type": "string", "pattern": "^[A-Za-z0-9+_.-]+$" }
+          }
+        }
+      ]
+    },
+    "pluginSelection": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": { "enabled": { "type": "boolean" } },
+      "additionalProperties": true
+    },
+    "pluginSelections": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/pluginSelection" }
+    },
+    "homebrewPackages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "formulae": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "casks": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nix": { "type": "array", "items": { "$ref": "#/$defs/nixPackage" }, "uniqueItems": true },
+        "homebrew": { "$ref": "#/$defs/homebrewPackages" },
+        "apt": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "pacman": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "packageExclusions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nix": { "type": "array", "items": { "$ref": "#/$defs/nixName" }, "uniqueItems": true },
+        "homebrew": { "$ref": "#/$defs/homebrewPackages" },
+        "apt": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "pacman": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+      }
+    },
+    "exclude": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dotfiles": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9@][A-Za-z0-9@._-]*$" },
+          "uniqueItems": true
+        },
+        "plugins": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "packageGroups": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "packages": { "$ref": "#/$defs/packageExclusions" }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["extends"],
+      "properties": {
+        "extends": { "type": ["string", "null"] },
+        "shells": {
+          "type": "array",
+          "items": { "enum": ["bash", "zsh", "fish", "nushell"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "primaryShell": { "enum": ["bash", "zsh", "fish", "nushell"] },
+        "development": { "type": "boolean" },
+        "packageGroups": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "allowUnfree": { "type": "array", "items": { "type": "string", "pattern": "^[A-Za-z0-9+_.-]+$" }, "uniqueItems": true },
+        "dotfiles": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9@][A-Za-z0-9@._-]*$" },
+          "uniqueItems": true
+        },
+        "plugins": { "$ref": "#/$defs/pluginSelections" },
+        "exclude": { "$ref": "#/$defs/exclude" },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "variables": {
+              "type": "object",
+              "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+              "additionalProperties": { "type": "string" }
+            },
+            "requiredSecrets": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+              "uniqueItems": true
+            }
+          }
+        },
+        "packages": { "$ref": "#/$defs/packages" },
+        "platforms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "macos": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "architectures": { "type": "array", "items": { "enum": ["arm64", "x86_64"] } },
+                "packages": { "$ref": "#/$defs/packages" },
+                "plugins": { "$ref": "#/$defs/pluginSelections" }
+              }
+            },
+            "linux": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "architectures": { "type": "array", "items": { "enum": ["arm64", "x86_64"] } },
+                "packages": { "$ref": "#/$defs/packages" },
+                "plugins": { "$ref": "#/$defs/pluginSelections" },
+                "distributions": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "arch": { "type": "object", "properties": { "packages": { "$ref": "#/$defs/packages" } }, "additionalProperties": false },
+                    "ubuntu": { "type": "object", "properties": { "packages": { "$ref": "#/$defs/packages" } }, "additionalProperties": false },
+                    "debian": { "type": "object", "properties": { "packages": { "$ref": "#/$defs/packages" } }, "additionalProperties": false },
+                    "generic": { "type": "object", "properties": { "packages": { "$ref": "#/$defs/packages" } }, "additionalProperties": false }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

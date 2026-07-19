@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "home-weave-nvm": {
+      "kind": "archive",
+      "version": "0.40.6",
+      "officialHosts": ["github.com"],
+      "artifacts": {
+        "default": {
+          "url": "https://github.com/nvm-sh/nvm/archive/refs/tags/v0.40.6.tar.gz",
+          "sha256": "sha256-FzAsrX/u2xrTO6c4+T0hdqkJcHJPIt4RlgNiT8vewaI=",
+          "sourceRoot": "nvm-0.40.6",
+          "install": {"kind": "copy-tree", "destination": "share/nvm"}
+        }
+      },
+      "meta": {
+        "description": "Official nvm-sh Node Version Manager release",
+        "homepage": "https://github.com/nvm-sh/nvm",
+        "license": "licenses.mit"
+      }
+    }
+  }
+}

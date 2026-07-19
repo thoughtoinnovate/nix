@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+          - runner: ubuntu-24.04-arm
+            system: aarch64-linux
+          - runner: macos-15
+            system: aarch64-darwin
+          - runner: macos-15-intel
+            system: x86_64-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install pinned Nix
+        run: bash tests/ci/install-nix.sh
+      - name: Verify native system
+        run: test "$(nix eval --no-write-lock-file --impure --raw --expr builtins.currentSystem)" = "${{ matrix.system }}"
+      - name: Evaluate flake
+        run: nix flake check path:. --no-build --no-write-lock-file
+      - name: Build balanced checks
+        run: |
+          nix build \
+            path:.#checks.${{ matrix.system }}.profile-config \
+            path:.#checks.${{ matrix.system }}.package-environment-evaluation \
+            path:.#checks.${{ matrix.system }}.home-weave-cli \
+            path:.#checks.${{ matrix.system }}.public-dotfile-sanitization \
+            --no-link --no-write-lock-file
+      - name: Run isolated native lifecycle
+        run: bash tests/ci/native-lifecycle.sh
+      - name: Verify checkout remains clean
+        if: always()
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  distro-containers:
+    name: Container (${{ matrix.distro }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, ubuntu, arch]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Test distribution container
+        run: bash tests/containers/run-e2e.sh --distro ${{ matrix.distro }}
+      - name: Verify checkout remains clean
+        if: always()
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain)"

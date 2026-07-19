@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -eu
+
+NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG
+}substituters = https://cache.nixos.org/
+trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+require-sigs = true
+sandbox = true"
+export NIX_CONFIG
+
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+
+exec nix --extra-experimental-features 'nix-command flakes' \
+  run "path:$ROOT#home-weave" -- "$@" --root "$ROOT"

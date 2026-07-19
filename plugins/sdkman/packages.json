@@ -1,0 +1,843 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "home-weave-sdkman-corretto11": {
+      "kind": "archive",
+      "version": "11.0.31.11.1",
+      "officialHosts": [
+        "corretto.aws"
+      ],
+      "artifacts": {
+        "x86_64-linux": {
+          "url": "https://corretto.aws/downloads/resources/11.0.31.11.1/amazon-corretto-11.0.31.11.1-linux-x64.tar.gz",
+          "sha256": "sha256-cPb/NmjyfRBS+eJsegDWAXdKVWpJ5unn+qnVEK4dDb4=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://corretto.aws/downloads/resources/11.0.31.11.1/amazon-corretto-11.0.31.11.1-linux-aarch64.tar.gz",
+          "sha256": "sha256-juX7qCFGM2PcdqGASeM40Sx0dSQwp0OqQFrxJqYiGNo=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/11.0.31.11.1/amazon-corretto-11.0.31.11.1-macosx-x64.tar.gz",
+          "sha256": "sha256-zieMF1FlApNBefr/fm1kqsC6sOSGM8eStZtwiTtWoOY=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/11.0.31.11.1/amazon-corretto-11.0.31.11.1-macosx-aarch64.tar.gz",
+          "sha256": "sha256-4xzB/ZtCv0DsBoKgJ8AkWZrB2EvyRHqx8ytMqpTAj6o=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "passthru": {
+        "home": "Contents/Home"
+      },
+      "meta": {
+        "description": "Amazon Corretto 11 official JDK",
+        "homepage": "https://aws.amazon.com/corretto/",
+        "license": "licenses.gpl2Only"
+      }
+    },
+    "home-weave-sdkman-corretto17": {
+      "kind": "archive",
+      "version": "17.0.19.10.1",
+      "officialHosts": [
+        "corretto.aws"
+      ],
+      "artifacts": {
+        "x86_64-linux": {
+          "url": "https://corretto.aws/downloads/resources/17.0.19.10.1/amazon-corretto-17.0.19.10.1-linux-x64.tar.gz",
+          "sha256": "sha256-0PG4gERWkUJVEcOqYsuJiJ8DpxwqQ1l6PfF0/AHT86A=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://corretto.aws/downloads/resources/17.0.19.10.1/amazon-corretto-17.0.19.10.1-linux-aarch64.tar.gz",
+          "sha256": "sha256-G591taL3QKszBVd4WOL8h9rYJ7YGeNRXMjTWNXvln6g=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/17.0.19.10.1/amazon-corretto-17.0.19.10.1-macosx-x64.tar.gz",
+          "sha256": "sha256-bTs+Nn4ad7mGe8G1qpJbHwXXag7GKwdeN1+pH9zqDpM=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/17.0.19.10.1/amazon-corretto-17.0.19.10.1-macosx-aarch64.tar.gz",
+          "sha256": "sha256-O6KrlX9g4zxhZNczCx9sn0i1/9YOTMm7zGfe8xnCmik=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "passthru": {
+        "home": "Contents/Home"
+      },
+      "meta": {
+        "description": "Amazon Corretto 17 official JDK",
+        "homepage": "https://aws.amazon.com/corretto/",
+        "license": "licenses.gpl2Only"
+      }
+    },
+    "home-weave-sdkman-corretto21": {
+      "kind": "archive",
+      "version": "21.0.11.10.1",
+      "officialHosts": [
+        "corretto.aws"
+      ],
+      "artifacts": {
+        "x86_64-linux": {
+          "url": "https://corretto.aws/downloads/resources/21.0.11.10.1/amazon-corretto-21.0.11.10.1-linux-x64.tar.gz",
+          "sha256": "sha256-W03IgX3xP4j5v8Q05dAYrbU1iJ/y/gzPdYvOvMIW85Q=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://corretto.aws/downloads/resources/21.0.11.10.1/amazon-corretto-21.0.11.10.1-linux-aarch64.tar.gz",
+          "sha256": "sha256-vEGWAtcdgZvOFHI5+9xIv7yQD6HWBpNTf7miK9a4ZHU=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/21.0.11.10.1/amazon-corretto-21.0.11.10.1-macosx-x64.tar.gz",
+          "sha256": "sha256-+wiwmvZ8qTDWhoQFJjJZ1eQ/qriSFvaIZ4DlRP1wDwA=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/21.0.11.10.1/amazon-corretto-21.0.11.10.1-macosx-aarch64.tar.gz",
+          "sha256": "sha256-xsm6Ce8K50GqBM+9Xvimt13S0mA0od4ICO55dqBERuo=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "passthru": {
+        "home": "Contents/Home"
+      },
+      "meta": {
+        "description": "Amazon Corretto 21 official JDK",
+        "homepage": "https://aws.amazon.com/corretto/",
+        "license": "licenses.gpl2Only"
+      }
+    },
+    "home-weave-sdkman-corretto26": {
+      "kind": "archive",
+      "version": "26.0.1.8.1",
+      "officialHosts": [
+        "corretto.aws"
+      ],
+      "artifacts": {
+        "x86_64-linux": {
+          "url": "https://corretto.aws/downloads/resources/26.0.1.8.1/amazon-corretto-26.0.1.8.1-linux-x64.tar.gz",
+          "sha256": "sha256-BKSeiqRf3ES2rb1LQjEjzsgpTKmBUXtEDTIs+joAqNU=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://corretto.aws/downloads/resources/26.0.1.8.1/amazon-corretto-26.0.1.8.1-linux-aarch64.tar.gz",
+          "sha256": "sha256-+0jkJFKdWo7fIpPy7jVP1dtsJnHwkm0e+gM6QOQmQUQ=",
+          "install": {
+            "kind": "copy-tree",
+            "destination": "Contents/Home"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/26.0.1.8.1/amazon-corretto-26.0.1.8.1-macosx-x64.tar.gz",
+          "sha256": "sha256-faeA8RdhGfuB2Eg599D6qCXFrq15nhFvN7J4iZ/1X+M=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-darwin": {
+          "url": "https://corretto.aws/downloads/resources/26.0.1.8.1/amazon-corretto-26.0.1.8.1-macosx-aarch64.tar.gz",
+          "sha256": "sha256-s4Wo1ztT8LLuJf6LCDatrpVU+ShKpD/DvFFv9ScJczg=",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "passthru": {
+        "home": "Contents/Home"
+      },
+      "meta": {
+        "description": "Amazon Corretto 26 official JDK",
+        "homepage": "https://aws.amazon.com/corretto/",
+        "license": "licenses.gpl2Only"
+      }
+    },
+    "home-weave-sdkman-java-toolchain": {
+      "kind": "bundle",
+      "version": "21-default",
+      "members": [],
+      "exposeBins": [
+        {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home/bin"
+        }
+      ],
+      "links": [
+        {
+          "package": "home-weave-sdkman-corretto11",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-11"
+        },
+        {
+          "package": "home-weave-sdkman-corretto17",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-17"
+        },
+        {
+          "package": "home-weave-sdkman-corretto21",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-21"
+        },
+        {
+          "package": "home-weave-sdkman-corretto26",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-26"
+        }
+      ],
+      "aliases": [
+        {
+          "name": "java11",
+          "package": "home-weave-sdkman-corretto11",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java17",
+          "package": "home-weave-sdkman-corretto17",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java21",
+          "package": "home-weave-sdkman-corretto21",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java26",
+          "package": "home-weave-sdkman-corretto26",
+          "executable": "Contents/Home/bin/java"
+        }
+      ],
+      "defaultJavaHome": {
+        "package": "home-weave-sdkman-corretto21",
+        "path": "Contents/Home"
+      },
+      "environment": {
+        "JAVA_HOME": {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home"
+        }
+      },
+      "meta": {
+        "description": "Pinned Corretto 11, 17, 21 and 26 bundle",
+        "license": "licenses.gpl2Only",
+        "mainProgram": "java"
+      }
+    },
+    "home-weave-sdkman-gradle": {
+      "kind": "archive",
+      "version": "9.6.1",
+      "officialHosts": [
+        "services.gradle.org"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip",
+          "sha256": "sha256-nA9/ruswbLFOQnmj4ITKa1lolAiaBjjmigfJRaMsnhQ=",
+          "format": "zip",
+          "sourceRoot": "gradle-9.6.1",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip",
+          "sha256": "sha256-nA9/ruswbLFOQnmj4ITKa1lolAiaBjjmigfJRaMsnhQ=",
+          "format": "zip",
+          "sourceRoot": "gradle-9.6.1",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip",
+          "sha256": "sha256-nA9/ruswbLFOQnmj4ITKa1lolAiaBjjmigfJRaMsnhQ=",
+          "format": "zip",
+          "sourceRoot": "gradle-9.6.1",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://services.gradle.org/distributions/gradle-9.6.1-bin.zip",
+          "sha256": "sha256-nA9/ruswbLFOQnmj4ITKa1lolAiaBjjmigfJRaMsnhQ=",
+          "format": "zip",
+          "sourceRoot": "gradle-9.6.1",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "meta": {
+        "description": "Official Gradle binary distribution",
+        "homepage": "https://gradle.org/",
+        "license": "licenses.asl20",
+        "mainProgram": "gradle"
+      }
+    },
+    "home-weave-sdkman-coursier": {
+      "kind": "script",
+      "version": "2.1.24",
+      "scriptFile": "plugins/sdkman/coursier-wrapper.sh",
+      "executableName": "cs",
+      "runtimePackages": [
+        "bash"
+      ],
+      "substitutions": {
+        "JAVA": {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home"
+        },
+        "COURSIER_JAR": {
+          "package": "home-weave-sdkman-coursier-jar"
+        }
+      },
+      "meta": {
+        "description": "Official Coursier launcher using the pinned upstream JAR",
+        "homepage": "https://get-coursier.io/",
+        "license": "licenses.asl20",
+        "mainProgram": "cs"
+      }
+    },
+    "home-weave-sdkman-sbt": {
+      "kind": "archive",
+      "version": "2.0.1",
+      "officialHosts": [
+        "github.com"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://github.com/sbt/sbt/releases/download/v2.0.1/sbt-2.0.1.tgz",
+          "sha256": "sha256-dQ7GGY12eaTBgQuNTWNJGK0SGw18ZN9onAur3rhF17g=",
+          "sourceRoot": "sbt",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/sbt/sbt/releases/download/v2.0.1/sbt-2.0.1.tgz",
+          "sha256": "sha256-dQ7GGY12eaTBgQuNTWNJGK0SGw18ZN9onAur3rhF17g=",
+          "sourceRoot": "sbt",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/sbt/sbt/releases/download/v2.0.1/sbt-2.0.1.tgz",
+          "sha256": "sha256-dQ7GGY12eaTBgQuNTWNJGK0SGw18ZN9onAur3rhF17g=",
+          "sourceRoot": "sbt",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://github.com/sbt/sbt/releases/download/v2.0.1/sbt-2.0.1.tgz",
+          "sha256": "sha256-dQ7GGY12eaTBgQuNTWNJGK0SGw18ZN9onAur3rhF17g=",
+          "sourceRoot": "sbt",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "meta": {
+        "description": "Official sbt binary distribution",
+        "homepage": "https://www.scala-sbt.org/",
+        "license": "licenses.asl20",
+        "mainProgram": "sbt"
+      }
+    },
+    "home-weave-sdkman-scala": {
+      "kind": "archive",
+      "version": "3.8.4",
+      "officialHosts": [
+        "github.com"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://github.com/scala/scala3/releases/download/3.8.4/scala3-3.8.4.tar.gz",
+          "sha256": "sha256-yy+aNY7ESe7EF9Y+/Ztvxr1moTsTR9ScJVceyihIV9M=",
+          "sourceRoot": "scala3-3.8.4",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/scala/scala3/releases/download/3.8.4/scala3-3.8.4.tar.gz",
+          "sha256": "sha256-yy+aNY7ESe7EF9Y+/Ztvxr1moTsTR9ScJVceyihIV9M=",
+          "sourceRoot": "scala3-3.8.4",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/scala/scala3/releases/download/3.8.4/scala3-3.8.4.tar.gz",
+          "sha256": "sha256-yy+aNY7ESe7EF9Y+/Ztvxr1moTsTR9ScJVceyihIV9M=",
+          "sourceRoot": "scala3-3.8.4",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://github.com/scala/scala3/releases/download/3.8.4/scala3-3.8.4.tar.gz",
+          "sha256": "sha256-yy+aNY7ESe7EF9Y+/Ztvxr1moTsTR9ScJVceyihIV9M=",
+          "sourceRoot": "scala3-3.8.4",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "meta": {
+        "description": "Official Scala 3 binary distribution",
+        "homepage": "https://www.scala-lang.org/",
+        "license": "licenses.asl20",
+        "mainProgram": "scala"
+      }
+    },
+    "home-weave-sdkman-scala-cli": {
+      "kind": "archive",
+      "version": "1.15.0",
+      "officialHosts": [
+        "github.com"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://github.com/Virtuslab/scala-cli/releases/download/v1.15.0/scala-cli-aarch64-apple-darwin.gz",
+          "sha256": "sha256-+xb3h398E1sxv6qP3HjUdvEOwQx5vLDRFSWQ77a43BM=",
+          "format": "gzip",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "scala-cli",
+                "target": "bin/scala-cli"
+              }
+            ]
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/Virtuslab/scala-cli/releases/download/v1.15.0/scala-cli-x86_64-apple-darwin.gz",
+          "sha256": "sha256-8T4fpDrhJNmKvPm2LGJCR0FNMHfjM+YKd/rbicVEhyg=",
+          "format": "gzip",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "scala-cli",
+                "target": "bin/scala-cli"
+              }
+            ]
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/Virtuslab/scala-cli/releases/download/v1.15.0/scala-cli-aarch64-pc-linux.gz",
+          "sha256": "sha256-534vm/yTOIeBXkxNGfWOrPemEc1fgCAhBIxcbIUUQMk=",
+          "format": "gzip",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "scala-cli",
+                "target": "bin/scala-cli"
+              }
+            ]
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://github.com/Virtuslab/scala-cli/releases/download/v1.15.0/scala-cli-x86_64-pc-linux.gz",
+          "sha256": "sha256-N7M5Of+CqHMCY7bHLYHiPbSYe0s5nIpAPI7OdmBKMPY=",
+          "format": "gzip",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "scala-cli",
+                "target": "bin/scala-cli"
+              }
+            ]
+          }
+        }
+      },
+      "meta": {
+        "description": "VirtusLab official Scala CLI native binary",
+        "homepage": "https://scala-cli.virtuslab.org/",
+        "license": "licenses.asl20",
+        "mainProgram": "scala-cli"
+      }
+    },
+    "home-weave-sdkman-cli": {
+      "kind": "archive",
+      "version": "5.23.0",
+      "officialHosts": [
+        "api.sdkman.io"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://api.sdkman.io/2/broker/download/sdkman/install/5.23.0/darwinarm64",
+          "sha256": "sha256-fvg1g6aYY1HqjIa4SUqIX8rpGi+/rJFmK8p+pPcr0jA=",
+          "format": "zip",
+          "sourceRoot": "sdkman-5.23.0",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://api.sdkman.io/2/broker/download/sdkman/install/5.23.0/darwinx64",
+          "sha256": "sha256-fvg1g6aYY1HqjIa4SUqIX8rpGi+/rJFmK8p+pPcr0jA=",
+          "format": "zip",
+          "sourceRoot": "sdkman-5.23.0",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://api.sdkman.io/2/broker/download/sdkman/install/5.23.0/linuxarm64",
+          "sha256": "sha256-fvg1g6aYY1HqjIa4SUqIX8rpGi+/rJFmK8p+pPcr0jA=",
+          "format": "zip",
+          "sourceRoot": "sdkman-5.23.0",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://api.sdkman.io/2/broker/download/sdkman/install/5.23.0/linuxx64",
+          "sha256": "sha256-fvg1g6aYY1HqjIa4SUqIX8rpGi+/rJFmK8p+pPcr0jA=",
+          "format": "zip",
+          "sourceRoot": "sdkman-5.23.0",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "meta": {
+        "description": "Pinned official SDKMAN CLI archive",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20"
+      }
+    },
+    "home-weave-sdkman-native": {
+      "kind": "archive",
+      "version": "0.7.34",
+      "officialHosts": [
+        "api.sdkman.io"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://api.sdkman.io/2/broker/download/native/install/0.7.34/darwinarm64",
+          "sha256": "sha256-YFMJlIcw8BaWD24irdMWDb8Eukm0JP7+k0rtJ9QgIJc=",
+          "format": "zip",
+          "sourceRoot": "sdkman-cli-native-0.7.34-aarch64-apple-darwin",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://api.sdkman.io/2/broker/download/native/install/0.7.34/darwinx64",
+          "sha256": "sha256-7Xsj10W8ZXJM+0gn+H9lT/6H9H1gVfPpBBUgOWp7/SE=",
+          "format": "zip",
+          "sourceRoot": "sdkman-cli-native-0.7.34-x86_64-apple-darwin",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://api.sdkman.io/2/broker/download/native/install/0.7.34/linuxarm64",
+          "sha256": "sha256-ebJ0cQeq7KHE08H+oReOw0IQ5DlJYzdxtcMfCMNT7ns=",
+          "format": "zip",
+          "sourceRoot": "sdkman-cli-native-0.7.34-aarch64-unknown-linux-gnu",
+          "install": {
+            "kind": "copy-tree"
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://api.sdkman.io/2/broker/download/native/install/0.7.34/linuxx64",
+          "sha256": "sha256-0mjhejb2+uVCuzgBjyv632BonEwd4L/y3P2s4IVd3wo=",
+          "format": "zip",
+          "sourceRoot": "sdkman-cli-native-0.7.34-x86_64-unknown-linux-gnu",
+          "install": {
+            "kind": "copy-tree"
+          }
+        }
+      },
+      "meta": {
+        "description": "Pinned official SDKMAN native archive",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20"
+      }
+    },
+    "home-weave-sdkman-runtime": {
+      "kind": "script",
+      "version": "5.23.0",
+      "scriptFile": "plugins/sdkman/sdkman-wrapper.sh",
+      "executableName": "sdk",
+      "runtimePackages": [
+        "bash",
+        "coreutils",
+        "curl",
+        "findutils",
+        "gnugrep",
+        "gnused",
+        "gawk",
+        "unzip",
+        "zip"
+      ],
+      "substitutions": {
+        "SDKMAN_CLI": {
+          "package": "home-weave-sdkman-cli"
+        },
+        "SDKMAN_NATIVE": {
+          "package": "home-weave-sdkman-native"
+        },
+        "JAVA11": {
+          "package": "home-weave-sdkman-corretto11",
+          "path": "Contents/Home"
+        },
+        "JAVA17": {
+          "package": "home-weave-sdkman-corretto17",
+          "path": "Contents/Home"
+        },
+        "JAVA21": {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home"
+        },
+        "JAVA26": {
+          "package": "home-weave-sdkman-corretto26",
+          "path": "Contents/Home"
+        },
+        "GRADLE": {
+          "package": "home-weave-sdkman-gradle"
+        },
+        "COURSIER": {
+          "package": "home-weave-sdkman-coursier"
+        },
+        "SBT": {
+          "package": "home-weave-sdkman-sbt"
+        },
+        "SCALA": {
+          "package": "home-weave-sdkman-scala"
+        },
+        "SCALA_CLI": {
+          "package": "home-weave-sdkman-scala-cli"
+        }
+      },
+      "meta": {
+        "description": "Pinned SDKMAN runtime seeded with declarative toolchains",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20",
+        "mainProgram": "sdk"
+      }
+    },
+    "home-weave-sdkman": {
+      "kind": "bundle",
+      "version": "5.23.0",
+      "members": [
+        "home-weave-sdkman-runtime"
+      ],
+      "links": [
+        {
+          "package": "home-weave-sdkman-gradle",
+          "source": "bin/gradle",
+          "target": "bin/gradle"
+        },
+        {
+          "package": "home-weave-sdkman-coursier",
+          "source": "bin/cs",
+          "target": "bin/cs"
+        },
+        {
+          "package": "home-weave-sdkman-sbt",
+          "source": "bin/sbt",
+          "target": "bin/sbt"
+        },
+        {
+          "package": "home-weave-sdkman-scala",
+          "source": "bin/scala",
+          "target": "bin/scala"
+        },
+        {
+          "package": "home-weave-sdkman-scala",
+          "source": "bin/scalac",
+          "target": "bin/scalac"
+        },
+        {
+          "package": "home-weave-sdkman-scala",
+          "source": "bin/scaladoc",
+          "target": "bin/scaladoc"
+        },
+        {
+          "package": "home-weave-sdkman-scala-cli",
+          "source": "bin/scala-cli",
+          "target": "bin/scala-cli"
+        },
+        {
+          "package": "home-weave-sdkman-corretto11",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-11"
+        },
+        {
+          "package": "home-weave-sdkman-corretto17",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-17"
+        },
+        {
+          "package": "home-weave-sdkman-corretto21",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-21"
+        },
+        {
+          "package": "home-weave-sdkman-corretto26",
+          "source": "Contents/Home",
+          "target": "lib/jdks/corretto-26"
+        }
+      ],
+      "meta": {
+        "description": "Pinned SDKMAN with Gradle, Coursier, sbt, Scala and Scala CLI",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20",
+        "mainProgram": "sdk"
+      },
+      "exposeBins": [
+        {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home/bin"
+        }
+      ],
+      "aliases": [
+        {
+          "name": "java11",
+          "package": "home-weave-sdkman-corretto11",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java17",
+          "package": "home-weave-sdkman-corretto17",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java21",
+          "package": "home-weave-sdkman-corretto21",
+          "executable": "Contents/Home/bin/java"
+        },
+        {
+          "name": "java26",
+          "package": "home-weave-sdkman-corretto26",
+          "executable": "Contents/Home/bin/java"
+        }
+      ],
+      "defaultJavaHome": {
+        "package": "home-weave-sdkman-corretto21",
+        "path": "Contents/Home"
+      },
+      "environment": {
+        "JAVA_HOME": {
+          "package": "home-weave-sdkman-corretto21",
+          "path": "Contents/Home"
+        }
+      }
+    },
+    "home-weave-sdkman-coursier-jar": {
+      "kind": "archive",
+      "version": "2.1.24",
+      "officialHosts": [
+        "github.com"
+      ],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://github.com/coursier/coursier/releases/download/v2.1.24/coursier.jar",
+          "sha256": "sha256-jHJNwgRTQ1PqgmO6CvYkl5ZY96tiOV81sE8DzlcU8zA=",
+          "format": "raw",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "share/java/coursier.jar",
+                "target": "share/java/coursier.jar"
+              }
+            ]
+          }
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/coursier/coursier/releases/download/v2.1.24/coursier.jar",
+          "sha256": "sha256-jHJNwgRTQ1PqgmO6CvYkl5ZY96tiOV81sE8DzlcU8zA=",
+          "format": "raw",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "share/java/coursier.jar",
+                "target": "share/java/coursier.jar"
+              }
+            ]
+          }
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/coursier/coursier/releases/download/v2.1.24/coursier.jar",
+          "sha256": "sha256-jHJNwgRTQ1PqgmO6CvYkl5ZY96tiOV81sE8DzlcU8zA=",
+          "format": "raw",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "share/java/coursier.jar",
+                "target": "share/java/coursier.jar"
+              }
+            ]
+          }
+        },
+        "x86_64-linux": {
+          "url": "https://github.com/coursier/coursier/releases/download/v2.1.24/coursier.jar",
+          "sha256": "sha256-jHJNwgRTQ1PqgmO6CvYkl5ZY96tiOV81sE8DzlcU8zA=",
+          "format": "raw",
+          "install": {
+            "kind": "executables",
+            "files": [
+              {
+                "source": "share/java/coursier.jar",
+                "target": "share/java/coursier.jar"
+              }
+            ]
+          }
+        }
+      },
+      "meta": {
+        "description": "Official Coursier universal launcher",
+        "homepage": "https://get-coursier.io/",
+        "license": "licenses.asl20"
+      }
+    }
+  }
+}

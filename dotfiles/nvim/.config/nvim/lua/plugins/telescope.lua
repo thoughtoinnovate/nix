@@ -1,0 +1,137 @@
+-- Telescope has been replaced by Snacks picker
+-- All functionality migrated to lua/config/keymaps/snacks.lua
+return {}
+
+-- return {
+--     {
+--         "nvim-telescope/telescope.nvim",
+--         tag = "0.1.8",
+--         branch = "0.1.x",
+--         dependencies = { "nvim-lua/plenary.nvim" },
+--         config = function()
+--             local telescope = require("telescope")
+--             local actions = require("telescope.actions")
+--
+--             telescope.setup({
+--                 defaults = {
+--                     -- Default configuration for telescope
+--                     prompt_prefix = " ",
+--                     selection_caret = " ",
+--                     path_display = { "truncate" },
+--
+--                     -- File ignore patterns
+--                     file_ignore_patterns = {
+--                         "node_modules/",
+--                         ".git/",
+--                         "dist/",
+--                         "build/",
+--                         "target/",
+--                         "%.class",
+--                         "%.jar",
+--                         "__pycache__/",
+--                         "%.pyc",
+--                         "%.o",
+--                         "%.a",
+--                         "%.out",
+--                         "%.so",
+--                     },
+--
+--                     -- Use ripgrep with better settings
+--                     vimgrep_arguments = {
+--                         "rg",
+--                         "--color=never",
+--                         "--no-heading",
+--                         "--with-filename",
+--                         "--line-number",
+--                         "--column",
+--                         "--smart-case",
+--                         "--hidden",           -- Search hidden files
+--                         "--glob=!.git/",      -- But ignore .git
+--                     },
+--
+--                     -- Keymaps
+--                     mappings = {
+--                         i = {
+--                             ["<C-u>"] = false,           -- Clear prompt
+--                             ["<C-d>"] = actions.delete_buffer,
+--                             ["<C-j>"] = actions.move_selection_next,
+--                             ["<C-k>"] = actions.move_selection_previous,
+--                         },
+--                         n = {
+--                             ["<C-d>"] = actions.delete_buffer,
+--                             ["q"] = actions.close,
+--                         },
+--                     },
+--
+--                     -- Layout configuration
+--                     layout_config = {
+--                         horizontal = {
+--                             preview_width = 0.55,
+--                             results_width = 0.8,
+--                         },
+--                         vertical = {
+--                             mirror = false,
+--                         },
+--                         width = 0.87,
+--                         height = 0.80,
+--                         preview_cutoff = 0,  -- Always show preview regardless of window size
+--                     },
+--
+--                     -- Preview settings
+--                     preview = {
+--                         treesitter = true,
+--                     },
+--
+--                     -- Other settings
+--                     sorting_strategy = "ascending",
+--                     selection_strategy = "reset",
+--                     scroll_strategy = "cycle",
+--                     color_devicons = true,
+--                 },
+--
+--                 -- Picker-specific settings
+--                 pickers = {
+--                     find_files = {
+--                         hidden = true,         -- Show hidden files
+--                         follow = true,         -- Follow symlinks
+--                         -- theme = "dropdown", -- Removed to enable preview
+--                     },
+--                     live_grep = {
+--                         additional_args = function()
+--                             return { "--hidden" }
+--                         end,
+--                     },
+--                     buffers = {
+--                         -- theme = "dropdown", -- Removed to enable preview
+--                         initial_mode = "normal",
+--                         mappings = {
+--                             i = {
+--                                 ["<C-d>"] = actions.delete_buffer,
+--                             },
+--                             n = {
+--                                 ["dd"] = actions.delete_buffer,
+--                             },
+--                         },
+--                     },
+--                 },
+--             })
+--         end,
+--     },
+--     {
+--         "nvim-telescope/telescope-ui-select.nvim",
+--         config = function()
+--             require("telescope").setup({
+--                 extensions = {
+--                     ["ui-select"] = {
+--                         require("telescope.themes").get_dropdown({
+--                             -- even more opts
+--                         }),
+--                     },
+--                 },
+--             })
+--             -- load_extension, somewhere after setup function:
+--             require("telescope").load_extension("ui-select")
+--             require("telescope").load_extension("dap")
+--         end,
+--     },
+-- }

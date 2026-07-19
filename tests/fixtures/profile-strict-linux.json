@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 4,
+  "distribution": {
+    "name": "strict-linux-fixture"
+  },
+  "defaults": {
+    "profile": "minimal"
+  },
+  "profiles": {
+    "parent": {
+      "extends": null,
+      "platforms": {
+        "linux": {
+          "packages": {
+            "apt": [
+              "curl"
+            ],
+            "pacman": [
+              "ripgrep"
+            ]
+          }
+        }
+      }
+    },
+    "minimal": {
+      "extends": "parent",
+      "exclude": {
+        "packages": {
+          "apt": [
+            "curl"
+          ],
+          "pacman": [
+            "ripgrep"
+          ]
+        }
+      }
+    }
+  }
+}

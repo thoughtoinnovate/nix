@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/thoughtoinnovate/nix/main/schemas/home-weave-v4.schema.json",
+  "schemaVersion": 4,
+  "distribution": {
+    "name": "company-home-weave",
+    "parent": "github:thoughtoinnovate/nix"
+  },
+  "defaults": {
+    "profile": "work"
+  },
+  "profiles": {
+    "work": {
+      "extends": "development",
+      "shells": [
+        "zsh"
+      ],
+      "primaryShell": "zsh",
+      "exclude": {},
+      "packageGroups": [],
+      "dotfiles": [],
+      "packages": {
+        "nix": []
+      },
+      "platforms": {
+        "macos": {
+          "packages": {}
+        },
+        "linux": {
+          "packages": {}
+        }
+      }
+    }
+  }
+}

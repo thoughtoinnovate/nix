@@ -1,0 +1,86 @@
+{
+  "$schema": "../schemas/package-catalog-v1.schema.json",
+  "schemaVersion": 1,
+  "base": [
+    "clang",
+    "curl",
+    "fd",
+    "git",
+    "gnumake",
+    "home-weave-cli",
+    "home-weave-env",
+    "neovim",
+    "neovimPython",
+    "nodejs",
+    "ripgrep",
+    "starship",
+    "stow",
+    "unzip"
+  ],
+  "development": [
+    "jq",
+    "lazygit",
+    "shellcheck",
+    "shfmt",
+    "tmux"
+  ],
+  "bundles": {
+    "neovim-development": [
+      "bash-language-server",
+      "black",
+      "cargo",
+      "delve",
+      "eslint",
+      "go",
+      "google-java-format",
+      "golangci-lint",
+      "gopls",
+      "imagemagick",
+      "jdt-language-server",
+      "jupyter",
+      "lua-language-server",
+      "markdownlint-cli2",
+      "marksman",
+      "prettier",
+      "pyright",
+      "ruff",
+      "rust-analyzer",
+      "rustc",
+      "shellcheck",
+      "shfmt",
+      "sqlfluff",
+      "stylua",
+      "taplo",
+      "typescript-language-server",
+      "vscode-js-debug",
+      "vscode-langservers-extracted",
+      "yaml-language-server"
+    ]
+  },
+  "groups": {
+    "python": ["python3", "python3Packages.debugpy", "black", "pyright", "ruff"],
+    "data-jupyter": [
+      "jupyter",
+      "python3Packages.notebook",
+      "python3Packages.ipykernel",
+      "jupytext",
+      "python3Packages.pillow",
+      "python3Packages.cairosvg"
+    ],
+    "go": ["go", "gopls", "delve", "golangci-lint"],
+    "rust": ["cargo", "rustc", "rust-analyzer", "taplo"],
+    "java": ["jdk17", "gradle", "jdt-language-server", "google-java-format"],
+    "web": [
+      "eslint",
+      "prettier",
+      "typescript-language-server",
+      "yaml-language-server",
+      "marksman",
+      "markdownlint-cli2",
+      "vscode-langservers-extracted",
+      "vscode-js-debug"
+    ],
+    "cloud": ["awscli2", "terraform", "kubectl", "minikube"],
+    "desktop": ["vscode"]
+  }
+}

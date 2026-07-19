@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "example-portable-tool": {
+      "kind": "archive",
+      "version": "1.0.0",
+      "officialHosts": ["downloads.example.invalid"],
+      "artifacts": {
+        "default": {
+          "url": "https://downloads.example.invalid/example-portable-tool.tar.gz",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "sourceRoot": "example-portable-tool-1.0.0",
+          "install": {"kind": "copy-tree", "destination": "share/example-portable-tool"}
+        }
+      }
+    },
+    "example-tool": {
+      "kind": "archive",
+      "version": "1.0.0",
+      "officialHosts": ["downloads.example.invalid"],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://downloads.example.invalid/example-tool.tar.gz",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "install": {
+            "kind": "executables",
+            "files": [{"source": "example-tool", "target": "bin/example-tool"}]
+          }
+        }
+      },
+      "meta": {
+        "description": "Schema-only package fixture",
+        "homepage": "https://example.invalid/",
+        "license": "licenses.mit",
+        "mainProgram": "example-tool"
+      }
+    },
+    "example-macos-app": {
+      "kind": "archive",
+      "version": "1.0.0",
+      "officialHosts": ["downloads.example.invalid"],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://downloads.example.invalid/example-app.dmg",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "format": "dmg",
+          "install": {
+            "kind": "macos-cli-app",
+            "bundle": "Example App.app",
+            "executable": "Contents/MacOS/example-app",
+            "command": "example-app"
+          }
+        }
+      }
+    }
+  }
+}

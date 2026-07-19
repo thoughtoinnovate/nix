@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 4,
+  "distribution": {
+    "name": "strict-fixture"
+  },
+  "defaults": {
+    "profile": "minimal"
+  },
+  "profiles": {
+    "parent": {
+      "extends": null,
+      "packageGroups": [
+        "cloud"
+      ],
+      "dotfiles": [
+        "nvim"
+      ],
+      "packages": {
+        "nix": [
+          "jq"
+        ]
+      },
+      "platforms": {
+        "macos": {
+          "packages": {
+            "homebrew": {
+              "formulae": [
+                "vault"
+              ],
+              "casks": [
+                "example-app"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "minimal": {
+      "extends": "parent",
+      "exclude": {
+        "dotfiles": [
+          "nvim"
+        ],
+        "packageGroups": [
+          "cloud"
+        ],
+        "packages": {
+          "nix": [
+            "jq"
+          ],
+          "homebrew": {
+            "formulae": [
+              "vault"
+            ],
+            "casks": [
+              "example-app"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
