@@ -311,12 +311,20 @@ For an intentionally broader reset, preview the separate command first:
 ~/.home-weave/home-weave nuke-all
 ```
 
-`nuke-all` removes the selected HomeWeave root and its recorded effects, then
-clears the current user's default modern or legacy Nix profile, deletes its
+`nuke-all` removes the selected HomeWeave root and its recorded effects, clears
+HomeWeave-owned external config/data/state/cache directories, removes dedicated
+HomeWeave package-profile links, and removes recognizable managed or legacy
+HomeWeave dotfile links (including dangling links restored from an older
+adoption backup). It then clears the current user's default modern or legacy
+Nix profile, deletes its
 old generations, removes `~/.cache/nix`, `~/.nix-channels`,
 `~/.nix-defexpr`, and `~/.nix-profile`, and finally runs
 `nix-collect-garbage -d`. If `XDG_CACHE_HOME` or `XDG_STATE_HOME` is set,
 their corresponding Nix paths are used too.
+
+Unrelated dotfiles and symlinks are retained. Provider-managed applications
+whose lifecycle is external are also retained; `nuke-all` removes HomeWeave's
+receipts and local state for them, not the applications themselves.
 
 This operation can remove Nix packages unrelated to HomeWeave and permanently
 removes rollback generations. It always displays the resolved paths and

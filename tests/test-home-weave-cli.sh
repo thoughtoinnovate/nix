@@ -37,6 +37,14 @@ grep -Fq 'profile wipe-history --profile "$profile"' "$CLI" || {
   printf 'nuke-all does not wipe non-current generations from the selected user Nix profile\n' >&2
   exit 1
 }
+grep -Fq 'cleanup_home_weave_artifact_links' "$CLI" || {
+  printf 'nuke-all does not clean recognizable HomeWeave artifact links\n' >&2
+  exit 1
+}
+grep -Fq 'cleanup_home_weave_external_state' "$CLI" || {
+  printf 'nuke-all does not clean external HomeWeave state namespaces\n' >&2
+  exit 1
+}
 if grep -Fq -- '--older-than 0d' "$CLI"; then
   printf 'nuke-all still uses the invalid Nix wipe-history duration 0d\n' >&2
   exit 1
@@ -701,12 +709,20 @@ grep -Fq 'Repository retained' <<<"$dry_run_output"
 # exact typed confirmation.
 mkdir -p "$TEST_HOME/.cache/nix"
 printf 'retain during dry run\n' >"$TEST_HOME/.cache/nix/marker"
+mkdir -p "$TEST_HOME/.config/home-weave" "$TEST_HOME/.local/share/home-weave"
+printf 'generated\n' >"$TEST_HOME/.config/home-weave/generated"
+ln -s "$TEST_HOME/.retired-home-weave/.state/dotfiles/current/.config/legacy" \
+  "$TEST_HOME/.config/legacy-home-weave-link"
 dry_run_output="$(run_cli nuke-all --dry-run --yes)"
 grep -Fq 'DESTRUCTIVE GLOBAL NIX CLEANUP' <<<"$dry_run_output"
 grep -Fq 'Would remove all elements from the current user default Nix profile.' <<<"$dry_run_output"
 grep -Fq 'Would run nix-collect-garbage -d last.' <<<"$dry_run_output"
 grep -Fq 'Would retain the Nix daemon, installer, and /nix infrastructure.' <<<"$dry_run_output"
+grep -Fq 'Would remove 1 legacy HomeWeave artifact link(s).' <<<"$dry_run_output"
+grep -Fq "Would remove HomeWeave external state: $TEST_HOME/.config/home-weave" <<<"$dry_run_output"
 test -f "$TEST_HOME/.cache/nix/marker"
+test -L "$TEST_HOME/.config/legacy-home-weave-link"
+test -f "$TEST_HOME/.config/home-weave/generated"
 test -d "$ROOT"
 if run_cli nuke-all --yes 2>"$TEST_ROOT/nuke-all-confirmation-error"; then
   printf 'expected non-interactive nuke-all to require typed confirmation\n' >&2

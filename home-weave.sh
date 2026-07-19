@@ -2685,6 +2685,161 @@ cleanup_stale_dotfile_links() {
   printf 'Removed %d dangling HomeWeave-owned link(s).\n' "${#stale_links[@]}"
 }
 
+prune_empty_dotfile_parents() {
+  local path="$1" parent
+  parent="$(dirname "$path")"
+  while [[ "$parent" == "$HOME/"* ]]; do
+    case "$parent" in
+      "$HOME/.config"|"$HOME/.local"|"$HOME/.local/bin"|"$HOME/Library"|\
+      "$HOME/Library/Application Support"|"$HOME/Library/Application Support/nushell")
+        break
+        ;;
+    esac
+    rmdir "$parent" 2>/dev/null || break
+    parent="$(dirname "$parent")"
+  done
+}
+
+is_home_weave_artifact_link() {
+  local link="$1" raw candidate
+  [[ -L "$link" ]] || return 1
+  raw="$(readlink "$link")" || return 1
+  if [[ "$raw" == /* ]]; then
+    candidate="$raw"
+  else
+    candidate="$(dirname "$link")/$raw"
+  fi
+  candidate="$(normalize_absolute_path "$candidate")" || return 1
+  case "$candidate" in
+    "$HOME/"*/.state/dotfiles/current|"$HOME/"*/.state/dotfiles/current/*)
+      return 0
+      ;;
+    /nix/store/*-home-manager-files/.config/shell/conf.d/home-weave-*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+collect_home_weave_artifact_links() {
+  local scan_root link
+  for scan_root in \
+    "$HOME" \
+    "$HOME/.config" \
+    "$HOME/.local/bin" \
+    "$HOME/Library/Application Support/nushell"; do
+    [[ -d "$scan_root" ]] || continue
+    if [[ "$scan_root" == "$HOME" ]]; then
+      while IFS= read -r -d '' link; do
+        is_home_weave_artifact_link "$link" && printf '%s\0' "$link"
+      done < <(find "$scan_root" -maxdepth 1 -type l -print0 2>/dev/null)
+    else
+      while IFS= read -r -d '' link; do
+        is_home_weave_artifact_link "$link" && printf '%s\0' "$link"
+      done < <(find "$scan_root" -type l -print0 2>/dev/null)
+    fi
+  done
+}
+
+cleanup_home_weave_artifact_links() {
+  local link existing duplicate
+  local links=()
+  while IFS= read -r -d '' link; do
+    duplicate=false
+    for existing in "${links[@]-}"; do
+      if [[ "$existing" == "$link" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    "$duplicate" || links+=("$link")
+  done < <(collect_home_weave_artifact_links)
+
+  if ((${#links[@]} == 0)); then
+    printf 'No legacy HomeWeave artifact links were found.\n'
+    return 0
+  fi
+  printf 'Legacy HomeWeave artifact links:\n'
+  for link in "${links[@]}"; do
+    printf '  %s -> %s\n' "$link" "$(readlink "$link")"
+  done
+  if "$DRY_RUN"; then
+    printf 'Would remove %d legacy HomeWeave artifact link(s).\n' "${#links[@]}"
+    return 0
+  fi
+  for link in "${links[@]}"; do
+    if is_home_weave_artifact_link "$link"; then
+      rm "$link"
+      prune_empty_dotfile_parents "$link"
+    else
+      warn "link changed during cleanup and was retained: $link"
+    fi
+  done
+  printf 'Removed %d legacy HomeWeave artifact link(s).\n' "${#links[@]}"
+}
+
+cleanup_empty_managed_directories() {
+  local generation directory relative destination removed=0
+  for generation in "$ROOT/.state/dotfiles/current" "$UNINSTALLED_DOTFILE_GENERATION"; do
+    [[ -n "$generation" && -d "$generation" ]] || continue
+    while IFS= read -r -d '' directory; do
+      relative="${directory#"$generation"/}"
+      [[ "$relative" != "$directory" ]] || continue
+      destination="$HOME/$relative"
+      [[ -d "$destination" && ! -L "$destination" ]] || continue
+      "$DRY_RUN" && continue
+      if rmdir "$destination" 2>/dev/null; then
+        ((removed += 1))
+      fi
+    done < <(find "$generation" -depth -type d -print0)
+  done
+  "$DRY_RUN" || printf 'Removed %d empty HomeWeave-managed directories.\n' "$removed"
+}
+
+cleanup_home_weave_external_state() {
+  local path profile_dir entry existing duplicate
+  local paths=(
+    "${XDG_CONFIG_HOME:-$HOME/.config}/home-weave"
+    "${XDG_DATA_HOME:-$HOME/.local/share}/home-weave"
+    "${XDG_STATE_HOME:-$HOME/.local/state}/home-weave"
+    "${XDG_CACHE_HOME:-$HOME/.cache}/home-weave"
+    "$HOME/.config/home-weave"
+    "$HOME/.local/share/home-weave"
+    "$HOME/.local/state/home-weave"
+    "$HOME/.cache/home-weave"
+  )
+  local unique_paths=()
+  for path in "${paths[@]}"; do
+    duplicate=false
+    for existing in "${unique_paths[@]-}"; do
+      [[ "$existing" != "$path" ]] || { duplicate=true; break; }
+    done
+    "$duplicate" || unique_paths+=("$path")
+  done
+
+  for path in "${unique_paths[@]}"; do
+    [[ -e "$path" || -L "$path" ]] || continue
+    if "$DRY_RUN"; then
+      printf 'Would remove HomeWeave external state: %s\n' "$path"
+    else
+      rm -rf -- "$path"
+      printf 'Removed HomeWeave external state: %s\n' "$path"
+    fi
+  done
+
+  profile_dir="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles"
+  [[ -d "$profile_dir" ]] || return 0
+  while IFS= read -r -d '' entry; do
+    if "$DRY_RUN"; then
+      printf 'Would remove HomeWeave package-profile artifact: %s\n' "$entry"
+    else
+      rm -f -- "$entry"
+      printf 'Removed HomeWeave package-profile artifact: %s\n' "$entry"
+    fi
+  done < <(find "$profile_dir" -maxdepth 1 \
+    \( -name home-weave -o -name 'home-weave-*-link' \) -print0)
+}
+
 uninstall_package_profile() {
   local profile receipt="" receipt_store receipt_generation actual_store actual_generation profile_dir profile_name
   profile="$(home_weave_package_profile)"
@@ -2825,6 +2980,9 @@ DESTRUCTIVE GLOBAL NIX CLEANUP
 
 This command removes:
   HomeWeave root:             $ROOT
+  HomeWeave external state:   config, data, state, and cache namespaces
+  HomeWeave artifact links:   recognized managed and legacy dotfile links
+  HomeWeave package profile:  dedicated profile links and generations
   Default user Nix profile:   $profile
   Default profile history:    all non-current generations
   Nix cache:                  $xdg_cache
@@ -2857,6 +3015,8 @@ nuke_all_command() {
       printf '\nNo HomeWeave repository exists at %s; root cleanup would be skipped.\n' "$ROOT"
     fi
     printf 'Would remove all elements from the current user default Nix profile.\n'
+    cleanup_home_weave_artifact_links
+    cleanup_home_weave_external_state
     printf 'Would delete its old profile generations and user Nix metadata/cache paths listed above.\n'
     printf 'Would run nix-collect-garbage -d last.\n'
     printf 'Would retain the Nix daemon, installer, and /nix infrastructure.\n'
@@ -2880,6 +3040,12 @@ nuke_all_command() {
   else
     warn "no HomeWeave repository exists at $ROOT; continuing with current-user Nix cleanup"
   fi
+
+  # An adoption backup can contain links created by an older HomeWeave root.
+  # Remove only recognizable generated-target layouts, then clear namespaces
+  # reserved for HomeWeave state outside the selected repository.
+  cleanup_home_weave_artifact_links
+  cleanup_home_weave_external_state
 
   profile="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/profile"
   xdg_cache="${XDG_CACHE_HOME:-$HOME/.cache}/nix"
@@ -2986,6 +3152,8 @@ uninstall_command() {
   "$UNINSTALL_KEEP_DOTFILES" || uninstall_dotfiles
   "$UNINSTALL_KEEP_DOTFILES" || cleanup_stale_dotfile_links
   "$UNINSTALL_NO_RESTORE" || restore_adopted_backups
+  "$UNINSTALL_KEEP_DOTFILES" || cleanup_stale_dotfile_links
+  "$UNINSTALL_KEEP_DOTFILES" || cleanup_empty_managed_directories
   "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_casks
   "$UNINSTALL_REMOVE_CASKS" && uninstall_recorded_providers
   "$UNINSTALL_KEEP_PACKAGES" || cleanup_recorded_plugin_state

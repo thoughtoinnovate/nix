@@ -492,12 +492,25 @@ For a complete fresh reset, preview and then run the same command without
 ~/.home-weave/home-weave uninstall --nuke
 ```
 
-Nuke removes the proven HomeWeave package profile, the active Stow generation,
-dangling links owned by that root, recorded removable applications, restored
+This scoped nuke removes the proven HomeWeave package profile, active Stow
+generation, links owned by that root, recorded removable applications, restored
 adoption backups, receipts, generated state, and the HomeWeave root. It retains
 Nix, shared store paths, unrelated links and packages, and applications whose
 provider retains lifecycle ownership. No uninstall mode performs global Nix
 store garbage collection.
+
+For an out-of-box reset of all user Nix state and all HomeWeave-owned external
+artifacts, use the broader command instead:
+
+```sh
+~/.home-weave/home-weave nuke-all --dry-run
+~/.home-weave/home-weave nuke-all
+```
+
+`nuke-all` also removes HomeWeave's config/data/state/cache namespaces,
+dedicated HomeWeave profile generations, and recognizable legacy or dangling
+HomeWeave links. It retains unrelated dotfiles and provider-managed apps whose
+lifecycle is external.
 
 ## If something goes wrong
 
