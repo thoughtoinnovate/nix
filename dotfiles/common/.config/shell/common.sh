@@ -15,6 +15,13 @@ if [ -n "$HOME_WEAVE_BREW" ]; then
 fi
 unset HOME_WEAVE_BREW
 
+HOME_WEAVE_LOCAL_BIN="$HOME/.local/bin"
+case ":$PATH:" in
+  *":$HOME_WEAVE_LOCAL_BIN:"*) ;;
+  *) export PATH="$HOME_WEAVE_LOCAL_BIN:$PATH" ;;
+esac
+unset HOME_WEAVE_LOCAL_BIN
+
 HOME_WEAVE_PROFILE_BIN="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-weave/bin"
 case ":$PATH:" in
   *":$HOME_WEAVE_PROFILE_BIN:"*) ;;

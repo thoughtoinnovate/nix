@@ -26,9 +26,9 @@
       "https://github.com/anomalyco/opencode"
     ],
     "requiredProvenance": [
-      "fromSource"
+      "binaryNativeCode"
     ],
-    "evidence": "Reviewed Nixpkgs recipe builds fixed-hash source from the official anomalyco/opencode repository"
+    "evidence": "HomeWeave fetches fixed-hash release binaries from the official anomalyco/opencode repository"
   },
   {
     "package": "awscli2",

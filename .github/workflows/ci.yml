@@ -43,6 +43,8 @@ jobs:
           nix build \
             path:.#checks.${{ matrix.system }}.profile-config \
             path:.#checks.${{ matrix.system }}.package-environment-evaluation \
+            path:.#checks.${{ matrix.system }}.opencode-release \
+            path:.#checks.${{ matrix.system }}.sdkman-java-integration \
             path:.#checks.${{ matrix.system }}.home-weave-cli \
             path:.#checks.${{ matrix.system }}.public-dotfile-sanitization \
             --no-link --no-write-lock-file

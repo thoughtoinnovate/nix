@@ -149,8 +149,9 @@ After a successful apply, open a fresh shell. The inherited
 use `home-weave plan`, `home-weave apply --yes`, and `home-weave status` from
 any directory. Until then, keep using `./home-weave` from the profile root.
 
-The inherited development profile also supplies the checksum-pinned NVM
-loader for Bash and Zsh. HomeWeave removes that managed loader during
+The inherited development profile supplies Bash, Fish, Zsh, Nushell, OpenCode,
+the Java/Gradle SDKMAN toolchain, and the checksum-pinned NVM loader for Bash
+and Zsh. HomeWeave removes that managed loader during
 uninstall, but deliberately retains user-installed Node versions and aliases
 under `~/.nvm`. Fish and Nushell use the profile's Nix-managed Node.js package.
 
@@ -282,11 +283,7 @@ It never runs `curl | bash`:
         {"version": "21.0.11-amzn", "default": true},
         {"version": "26.0.1-amzn", "default": false}
       ],
-      "gradle": [{"version": "9.6.1", "default": true}],
-      "coursier": [{"version": "2.1.24", "default": true}],
-      "sbt": [{"version": "2.0.1", "default": true}],
-      "scala": [{"version": "3.8.4", "default": true}],
-      "scalacli": [{"version": "1.15.0", "default": true}]
+      "gradle": [{"version": "9.6.1", "default": true}]
     }
   }
 }

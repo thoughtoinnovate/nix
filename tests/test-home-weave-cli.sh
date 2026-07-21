@@ -45,6 +45,22 @@ grep -Fq 'cleanup_home_weave_external_state' "$CLI" || {
   printf 'nuke-all does not clean external HomeWeave state namespaces\n' >&2
   exit 1
 }
+grep -Fq 'write_active_root_launcher' "$CLI" || {
+  printf 'successful apply does not install a root-aware HomeWeave launcher\n' >&2
+  exit 1
+}
+grep -Fq 'remove_active_root_launcher' "$CLI" || {
+  printf 'nuke does not remove the root-aware HomeWeave launcher\n' >&2
+  exit 1
+}
+grep -Fq 'ai|python|data-jupyter|go|rust|java|web|cloud|desktop' "$CLI" || {
+  printf 'guided setup does not accept the public AI package group\n' >&2
+  exit 1
+}
+grep -Fq '[already included]' "$CLI" || {
+  printf 'guided setup does not identify inherited package groups\n' >&2
+  exit 1
+}
 if grep -Fq -- '--older-than 0d' "$CLI"; then
   printf 'nuke-all still uses the invalid Nix wipe-history duration 0d\n' >&2
   exit 1

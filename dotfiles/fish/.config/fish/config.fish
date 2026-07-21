@@ -11,6 +11,12 @@ if test -n "$home_weave_brew"
 end
 set -e home_weave_brew
 
+set home_weave_local_bin $HOME/.local/bin
+if not contains -- $home_weave_local_bin $PATH
+    set -gx PATH $home_weave_local_bin $PATH
+end
+set -e home_weave_local_bin
+
 set home_weave_state_root $HOME/.local/state
 if set -q XDG_STATE_HOME
     set home_weave_state_root $XDG_STATE_HOME

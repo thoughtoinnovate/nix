@@ -16,7 +16,7 @@ fixture='{
   },
   "legacyPackages.aarch64-darwin.opencode": {
     "homepage": "https://github.com/anomalyco/opencode",
-    "provenance": ["fromSource"]
+    "provenance": ["binaryNativeCode"]
   },
   "legacyPackages.aarch64-darwin.awscli2": {
     "homepage": "https://aws.amazon.com/cli/",
@@ -28,6 +28,10 @@ fixture='{
   },
   "legacyPackages.aarch64-darwin.opencode-wrong-source": {
     "homepage": "https://github.com/someone/opencode",
+    "provenance": ["binaryNativeCode"]
+  },
+  "legacyPackages.aarch64-darwin.opencode-wrong-provenance": {
+    "homepage": "https://github.com/anomalyco/opencode",
     "provenance": ["fromSource"]
   },
   "legacyPackages.aarch64-darwin.claude-code-wrong-provenance": {
@@ -46,6 +50,7 @@ jq -e '
   .["legacyPackages.aarch64-darwin.awscli2"].publisherVerified == true and
   .["legacyPackages.aarch64-darwin.codex-lookalike"].publisherVerified == false and
   .["legacyPackages.aarch64-darwin.opencode-wrong-source"].publisherVerified == false and
+  .["legacyPackages.aarch64-darwin.opencode-wrong-provenance"].publisherVerified == false and
   .["legacyPackages.aarch64-darwin.claude-code-wrong-provenance"].publisherVerified == false
 ' >/dev/null <<<"$result"
 

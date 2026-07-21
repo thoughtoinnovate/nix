@@ -10,6 +10,7 @@ let
     scala = [ "3.8.4" ];
     scalacli = [ "1.15.0" ];
   };
+  publicCandidateNames = [ "gradle" "java" ];
   versions = entries: lib.sort builtins.lessThan (map (entry: entry.version) entries);
   expectedVersions = name: lib.sort builtins.lessThan expected.${name};
   defaultCount = entries: builtins.length (builtins.filter (entry: entry.default or false) entries);
@@ -30,20 +31,22 @@ in
       expectedNames = lib.sort builtins.lessThan (builtins.attrNames expected);
       versionsMatch = lib.all
         (candidate: versions (candidates.${candidate} or [ ]) == expectedVersions candidate)
-        expectedNames;
+        candidateNames;
+      publicSelection = candidateNames == publicCandidateNames;
+      fullSelection = candidateNames == expectedNames;
       defaultsValid = defaultCount (candidates.java or [ ]) == 1
         && lib.all (candidate: defaultCount (candidates.${candidate} or [ ]) == 1)
-          [ "gradle" "coursier" "sbt" "scala" "scalacli" ];
+          (builtins.filter (candidate: candidate != "java") candidateNames);
       statePath = "~/.local/share/home-weave/${profileName}/plugins/sdkman";
     in
     if (selection.storage or null) != "nix-store" then
       throw "HomeWeave SDKMAN plugin requires storage = nix-store"
     else if !(builtins.isBool (selection.allowRuntimeChanges or null)) then
       throw "HomeWeave SDKMAN plugin requires boolean allowRuntimeChanges"
-    else if candidateNames != expectedNames || !versionsMatch || !defaultsValid then
-      throw "HomeWeave SDKMAN plugin candidates must match the reviewed public catalog and declare one default per candidate"
+    else if !(publicSelection || fullSelection) || !versionsMatch || !defaultsValid then
+      throw "HomeWeave SDKMAN plugin candidates must select either the public Java/Gradle toolchain or the reviewed full toolchain, with one default per candidate"
     else {
-      nixPackages = [ "home-weave-sdkman" ];
+      nixPackages = [ (if publicSelection then "home-weave-sdkman-java" else "home-weave-sdkman") ];
       providerPackages = { };
       allowUnfree = [ ];
       environmentVariables = {

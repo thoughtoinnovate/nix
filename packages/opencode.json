@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "packages": {
+    "opencode": {
+      "kind": "archive",
+      "version": "1.18.4",
+      "officialHosts": ["github.com"],
+      "artifacts": {
+        "aarch64-darwin": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-darwin-arm64.zip",
+          "sha256": "sha256-BPuIG2MrMjxxLf2m3LvG/Oc2OU8HunYXblLWZlkl1OY=",
+          "format": "zip",
+          "sourceRoot": ".",
+          "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
+        },
+        "x86_64-darwin": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-darwin-x64.zip",
+          "sha256": "sha256-4XfFMmVFcgeZgdsdzkZKeK267ZZUoUKEiy6BvrjJ9cY=",
+          "format": "zip",
+          "sourceRoot": ".",
+          "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
+        },
+        "aarch64-linux": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-arm64.tar.gz",
+          "sha256": "sha256-66h++6OXbVM6JMygMW+O83W1+OeXwKlcJe6RlwC3ujU=",
+          "sourceRoot": ".",
+          "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
+        },
+        "x86_64-linux": {
+          "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-x64.tar.gz",
+          "sha256": "sha256-urRjw/syJNOIu3z61j84cD35zwviz9LOjLSdiGtToXQ=",
+          "sourceRoot": ".",
+          "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
+        }
+      },
+      "meta": {
+        "description": "OpenCode official precompiled release",
+        "homepage": "https://github.com/anomalyco/opencode",
+        "license": "licenses.mit",
+        "mainProgram": "opencode"
+      }
+    }
+  }
+}

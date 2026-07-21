@@ -41,9 +41,9 @@ adopts or records that secrets file; see the quick-start guide for usage.
 
 - `base`: HomeWeave, selected shells, Git, Stow, Starship, Neovim, and its
   minimal editor/runtime dependencies.
-- `development`: everything in `base`, plus `jq`, tmux, lazygit, ShellCheck,
-  and shfmt.
-- opt-in groups: `python`, `data-jupyter`, `go`, `rust`, `java`, `web`,
+- `development`: everything in `base`, all four supported shells, `jq`, tmux,
+  lazygit, ShellCheck, shfmt, OpenCode, NVM, and the Java/Gradle SDKMAN toolchain.
+- opt-in groups: `ai`, `python`, `data-jupyter`, `go`, `rust`, `java`, `web`,
   `cloud`, and `desktop`. Profiles merge inherited `packageGroups` and
   `packages.nix` uniquely.
 - `darwin`: nix-darwin integration and optional Homebrew installation of the
@@ -293,6 +293,18 @@ the most recent successful activation.
 `install.sh` is the internal activation backend. Users should use the
 `home-weave` command.
 
+After a successful apply, HomeWeave installs a small user-local launcher at
+`~/.local/bin/home-weave`. It records the selected setup root, so plain
+`home-weave plan`, `apply`, and `update` target that profile even when setup
+used a custom root. An explicit `--root` or `HOME_WEAVE_ROOT` still takes
+precedence.
+
+The launcher remembers one active repository root. Within that repository,
+select a named profile explicitly, for example `home-weave apply --profile
+development`. When working with another HomeWeave repository, use
+`home-weave apply --root /path/to/other-root --profile NAME`; `--root` takes
+precedence without changing the active-root launcher.
+
 `home-weave uninstall`, `uninstall --profile NAME`, `uninstall --all`, and
 `uninstall --nuke` can remove the dedicated HomeWeave package profile, unlink only
 the active HomeWeave Stow generation, restore missing pre-adoption files,
@@ -379,8 +391,9 @@ Node.js package. Uninstall removes HomeWeave's managed loader but retains
 user-created Node versions and aliases under `~/.nvm`.
 
 The public `sdkman` plugin is cross-platform and uses only fixed, reviewed
-official artifacts in the Nix store. It seeds Corretto 11/17/21/26, Gradle,
-Coursier, sbt, Scala, and Scala CLI; mutable SDKMAN state is isolated below
+official artifacts in the Nix store. The inherited development selection seeds
+Corretto 11/17/21/26 and Gradle. Profiles that need the reviewed full toolchain
+may explicitly add Coursier, sbt, Scala, and Scala CLI. Mutable SDKMAN state is isolated below
 `~/.local/share/home-weave/<profile>/plugins/sdkman` and removed on final
 uninstall. No SDKMAN bootstrap script is piped from the network. Use
 `home-weave plugin list`, `plugin show sdkman`, and `plugin status sdkman` to
@@ -536,8 +549,9 @@ At this repository's current lock, Neovim is `0.12.4`. Updating `flake.lock`
 updates the package snapshot and must be reviewed like a dependency upgrade.
 
 Nixpkgs packages are maintained build recipes, not a guarantee that each
-vendor publishes or endorses the Nix package. In particular, CLI packages such
-as Codex, Claude Code, and OpenCode should be reviewed in Nixpkgs before each
+vendor publishes or endorses the Nix package. OpenCode is instead pinned from
+its official fixed-hash release artifacts for every supported system. Other CLI
+packages such as Codex and Claude Code should be reviewed in Nixpkgs before each
 lock update. Ghostty's optional Linux package comes from Nixpkgs; its macOS application
 comes from Homebrew's official cask. HomeWeave controls package-profile installation and activation but does not change the upstream source selected by Nixpkgs.
 

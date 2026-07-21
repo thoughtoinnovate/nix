@@ -50,12 +50,15 @@
         inherit declarativePackages;
         sourceRoot = self.outPath;
       };
+      opencodeOverlay = declarativePackages.mkOverlay {
+        catalog = builtins.fromJSON (builtins.readFile ./packages/opencode.json);
+      };
       publicPlugins = {
         sdkman = sdkmanPlugin;
         nvm = nvmPlugin;
       };
       baseOverlay = nixpkgs.lib.composeManyExtensions [
-        rawBaseOverlay sdkmanPlugin.overlay nvmPlugin.overlay
+        rawBaseOverlay sdkmanPlugin.overlay nvmPlugin.overlay opencodeOverlay
       ];
       defaultProfileManifest = builtins.fromJSON (builtins.readFile ./templates/profile/home-weave.json);
       defaultCoreManifest = defaultProfileManifest // {
@@ -71,12 +74,28 @@
           development = {
             extends = "base";
             development = true;
+            shells = [ "bash" "fish" "zsh" "nushell" ];
+            primaryShell = "zsh";
             packageGroups = [ ];
             dotfiles = [ ];
             packages.nix = publicPackageCatalog.development;
             plugins.nvm = {
               enabled = true;
               storage = "nix-store";
+            };
+            plugins.sdkman = {
+              enabled = true;
+              storage = "nix-store";
+              allowRuntimeChanges = true;
+              candidates = {
+                java = [
+                  { version = "11.0.31-amzn"; default = false; }
+                  { version = "17.0.19-amzn"; default = false; }
+                  { version = "21.0.11-amzn"; default = true; }
+                  { version = "26.0.1-amzn"; default = false; }
+                ];
+                gradle = [ { version = "9.6.1"; default = true; } ];
+              };
             };
           };
         };
@@ -206,11 +225,12 @@
               home-weave-env
               home-weave-native-provider
               home-weave-verified-installer
+              opencode
               ;
 
             home-weave = pkgs.home-weave-cli;
             home-weave-environment = profileEnvironments.${defaultProfileName};
-            inherit (pkgs) home-weave-sdkman;
+            inherit (pkgs) home-weave-sdkman home-weave-sdkman-java;
 
             default = pkgs.development-tools;
           } // nixpkgs.lib.mapAttrs' (name: environment:
@@ -387,9 +407,48 @@
                 touch $out
               '';
 
+            opencode-release =
+              pkgs.runCommand "opencode-release" {
+                nativeBuildInputs = [ pkgs.opencode ];
+              } ''
+                HOME="$TMPDIR" opencode --version >version
+                test "$(cat version)" = "1.18.4"
+                touch $out
+              '';
+
+            sdkman-java-integration =
+              pkgs.runCommand "sdkman-java-integration" {
+                nativeBuildInputs = [ pkgs.home-weave-sdkman-java ];
+              } ''
+                state="$TMPDIR/sdkman-state"
+                mkdir -p "$state/candidates/scala"
+                ln -s /nix/store/home-weave-obsolete-scala "$state/candidates/scala/3.8.4"
+                ln -s 3.8.4 "$state/candidates/scala/current"
+                HOME_WEAVE_SDKMAN_STATE="$state" sdk version >/dev/null
+                test -d "$state/candidates/java"
+                test -d "$state/candidates/gradle"
+                test ! -e "$state/candidates/scala/3.8.4"
+                test ! -e "$state/candidates/scala/current"
+                test "$(cut -d' ' -f1 "$state/var/home-weave-managed-candidates" | sort -u | tr '\n' ' ')" = "gradle java "
+                test -x ${pkgs.home-weave-sdkman-java}/bin/java
+                test -x ${pkgs.home-weave-sdkman-java}/bin/gradle
+                touch $out
+              '';
+
             package-environment-evaluation =
               assert builtins.elem "home-weave-nvm"
                 defaultResolvedBySystem.${system}.profiles.development.nixPackages;
+              assert builtins.elem "opencode"
+                defaultResolvedBySystem.${system}.profiles.development.nixPackages;
+              assert builtins.elem "home-weave-sdkman-java"
+                defaultResolvedBySystem.${system}.profiles.development.nixPackages;
+              assert !(builtins.elem "home-weave-sdkman"
+                defaultResolvedBySystem.${system}.profiles.development.nixPackages);
+              assert defaultResolvedBySystem.${system}.profiles.development.shells
+                == [ "bash" "fish" "zsh" "nushell" ];
+              assert builtins.attrNames defaultResolvedBySystem.${system}.profiles.development
+                .pluginContributions.sdkman.metadata.candidates == [ "gradle" "java" ];
+              assert publicPackageCatalog.groups.ai == [ "opencode" ];
               assert defaultResolvedBySystem.${system}.profiles.development
                 .pluginContributions.nvm.metadata.shellSupport == [ "bash" "zsh" ];
               assert defaultResolvedBySystem.${system}.profiles.development

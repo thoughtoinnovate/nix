@@ -531,6 +531,61 @@ write_state() {
   printf '%s\n' "$PROFILE" >"$ROOT/.state/active-profile"
   rm -f "$ROOT/.state/selected-profile"
   printf '%s\n' "$PRIMARY_SHELL" >"$ROOT/.state/primary-shell"
+  write_active_root_launcher
+}
+
+active_root_state_file() {
+  printf '%s/home-weave/active-root\n' "${XDG_STATE_HOME:-$HOME/.local/state}"
+}
+
+active_root_launcher_path() {
+  printf '%s/.local/bin/home-weave\n' "$HOME"
+}
+
+write_active_root_launcher() {
+  local state_file launcher temporary
+  state_file="$(active_root_state_file)"
+  launcher="$(active_root_launcher_path)"
+  if [[ -e "$launcher" || -L "$launcher" ]]; then
+    if ! grep -Fqx '# HomeWeave active-root launcher' "$launcher" 2>/dev/null; then
+      warn "cannot install the root-aware HomeWeave launcher because $launcher is not HomeWeave-managed"
+      return 0
+    fi
+  fi
+  install -d -m 0700 "$(dirname "$state_file")"
+  printf '%s\n' "$ROOT" >"$state_file"
+  chmod 0600 "$state_file"
+  install -d -m 0755 "$(dirname "$launcher")"
+  temporary="${launcher}.tmp.$$"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' '# HomeWeave active-root launcher'
+    printf 'export HOME_WEAVE_ROOT=%q\n' "$ROOT"
+    printf '%s\n' 'profile_bin="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-weave/bin/home-weave"'
+    printf '%s\n' 'if [[ ! -x "$profile_bin" ]]; then'
+    printf '%s\n' '  printf "error: HomeWeave Nix profile launcher is unavailable: %s\\n" "$profile_bin" >&2'
+    printf '%s\n' '  exit 127'
+    printf '%s\n' 'fi'
+    printf '%s\n' 'exec "$profile_bin" "$@"'
+  } >"$temporary"
+  chmod 0755 "$temporary"
+  mv "$temporary" "$launcher"
+  printf 'Installed root-aware HomeWeave launcher: %s\n' "$launcher"
+}
+
+remove_active_root_launcher() {
+  local state_file launcher active_root
+  state_file="$(active_root_state_file)"
+  launcher="$(active_root_launcher_path)"
+  [[ -r "$state_file" ]] || return 0
+  active_root="$(<"$state_file")"
+  [[ "$active_root" == "$ROOT" || "$UNINSTALL_NUKE" == true ]] || return 0
+  if [[ -f "$launcher" ]] && grep -Fqx '# HomeWeave active-root launcher' "$launcher"; then
+    rm -f "$launcher"
+    printf 'Removed root-aware HomeWeave launcher: %s\n' "$launcher"
+  fi
+  rm -f "$state_file"
+  rmdir "$(dirname "$state_file")" 2>/dev/null || true
 }
 
 write_pending_state() {
@@ -729,7 +784,7 @@ add_profile_groups() {
   local file="$ROOT/home-weave.json" temporary group groups_json
   for group in "$@"; do
     case "$group" in
-      python|data-jupyter|go|rust|java|web|cloud|desktop) ;;
+      ai|python|data-jupyter|go|rust|java|web|cloud|desktop) ;;
       *) fail "unknown package group: $group" ;;
     esac
   done
@@ -743,24 +798,54 @@ add_profile_groups() {
 }
 
 select_package_groups() {
-  local catalog group count packages selected selection token index valid line
-  local rows=() selected_groups=() tokens=()
+  local catalog group count packages selected selection token index valid line package
+  local rows=() selectable_groups=() selected_groups=() requested_groups=() tokens=()
   catalog="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "$BASE_URL#lib.packageCatalog.groups" 2>/dev/null || printf '{}')"
   [[ "$(jq -r 'type' <<<"$catalog")" == object ]] || return 0
-  printf '\nOptional package groups (exact download and closure sizes appear in plan):\n'
+  load_default_package_ids
+
+  group_is_inherited() {
+    local candidate
+    while IFS= read -r candidate; do
+      grep -Fxq "$candidate" <<<"$DEFAULT_PACKAGE_IDS" || return 1
+    done < <(jq -r --arg group "$1" '.[$group][]' <<<"$catalog")
+    return 0
+  }
+
+  printf '\nOptional package groups (including AI tools; exact download and closure sizes appear in plan):\n'
   while IFS= read -r group; do
     count="$(jq -r --arg group "$group" '.[$group] | length' <<<"$catalog")"
     packages="$(jq -r --arg group "$group" '.[$group] | join(", ")' <<<"$catalog")"
-    printf '  %-13s %2s packages  %s\n' "$group" "$count" "$packages"
-    rows+=("$(printf '%-13s %2s packages  %s' "$group" "$count" "$packages")")
+    if group_is_inherited "$group"; then
+      printf '  %-13s %2s packages  %s [already included]\n' "$group" "$count" "$packages"
+    else
+      printf '  %-13s %2s packages  %s\n' "$group" "$count" "$packages"
+      selectable_groups+=("$group")
+      rows+=("$(printf '%-13s %2s packages  %s' "$group" "$count" "$packages")")
+    fi
   done < <(jq -r 'keys[]' <<<"$catalog")
 
   if ((${#REQUESTED_GROUPS[@]} > 0)); then
-    printf 'Selected package groups from --group: %s\n' "$(IFS=', '; printf '%s' "${REQUESTED_GROUPS[*]}")"
+    for group in "${REQUESTED_GROUPS[@]}"; do
+      jq -e --arg group "$group" 'has($group)' >/dev/null <<<"$catalog" \
+        || fail "unknown package group: $group"
+      if group_is_inherited "$group"; then
+        printf 'Package group %s is already supplied by the inherited profile.\n' "$group"
+      else
+        requested_groups+=("$group")
+      fi
+    done
+    REQUESTED_GROUPS=("${requested_groups[@]}")
+    ((${#REQUESTED_GROUPS[@]} == 0)) \
+      || printf 'Selected package groups from --group: %s\n' "$(IFS=', '; printf '%s' "${REQUESTED_GROUPS[*]}")"
     return 0
   fi
   [[ -t 0 ]] || return 0
+  if ((${#selectable_groups[@]} == 0)); then
+    printf 'All optional package groups are already included.\n'
+    return 0
+  fi
 
   if command -v gum >/dev/null 2>&1; then
     selected="$(
@@ -779,7 +864,7 @@ select_package_groups() {
     done <<<"$selected"
   else
     index=0
-    for group in $(jq -r 'keys[]' <<<"$catalog"); do
+    for group in "${selectable_groups[@]}"; do
       printf '  %d) %s\n' "$((++index))" "$group"
     done
     while :; do
@@ -793,11 +878,16 @@ select_package_groups() {
       for token in "${tokens[@]}"; do
         if [[ "$token" =~ ^[0-9]+$ ]]; then
           index=$((10#$token - 1))
-          group="$(jq -r --argjson index "$index" 'keys[$index] // empty' <<<"$catalog")"
+          if ((index < 0 || index >= ${#selectable_groups[@]})); then
+            group=""
+          else
+            group="${selectable_groups[$index]}"
+          fi
         else
           group="$token"
         fi
-        if [[ -z "$group" ]] || ! jq -e --arg group "$group" 'has($group)' >/dev/null <<<"$catalog"; then
+        if [[ -z "$group" ]] \
+          || ! printf '%s\n' "${selectable_groups[@]}" | grep -Fxq "$group"; then
           warn "unknown package group: $token"
           valid=false
           break
@@ -2797,7 +2887,7 @@ cleanup_empty_managed_directories() {
 }
 
 cleanup_home_weave_external_state() {
-  local path profile_dir entry existing duplicate
+  local path profile_dir entry existing duplicate launcher
   local paths=(
     "${XDG_CONFIG_HOME:-$HOME/.config}/home-weave"
     "${XDG_DATA_HOME:-$HOME/.local/share}/home-weave"
@@ -2826,6 +2916,16 @@ cleanup_home_weave_external_state() {
       printf 'Removed HomeWeave external state: %s\n' "$path"
     fi
   done
+
+  launcher="$(active_root_launcher_path)"
+  if [[ -f "$launcher" ]] && grep -Fqx '# HomeWeave active-root launcher' "$launcher"; then
+    if "$DRY_RUN"; then
+      printf 'Would remove root-aware HomeWeave launcher: %s\n' "$launcher"
+    else
+      rm -f "$launcher"
+      printf 'Removed root-aware HomeWeave launcher: %s\n' "$launcher"
+    fi
+  fi
 
   profile_dir="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles"
   [[ -d "$profile_dir" ]] || return 0
@@ -3164,6 +3264,7 @@ uninstall_command() {
       printf 'Would retain Nix and would not run global garbage collection.\n'
       return
     fi
+    remove_active_root_launcher
     rm -rf "$ROOT"
     printf 'HomeWeave root removed. Nix and the shared store were retained.\n'
     return

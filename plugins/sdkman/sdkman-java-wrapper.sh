@@ -25,13 +25,9 @@ if [[ ! -f "$state/var/version" ]] || [[ "$(cat "$state/var/version")" != "$vers
   printf '%s\n' "$sdkman_platform" >"$state/var/platform"
 fi
 
-# This wrapper runs SDKMAN in a non-interactive Bash process so it can be
-# invoked from every HomeWeave-supported shell. Bash completion requires an
-# interactive shell; enabling it here makes SDKMAN call the unavailable
-# `complete` builtin and abort before processing the requested command.
-# Reconcile this managed configuration on every invocation so existing state
-# created by an older profile is repaired as soon as the updated wrapper runs.
-mkdir -p "$state/etc" "$state/var"
+mkdir -p "$state/etc" "$state/var" "$state/ext" "$state/tmp" \
+  "$state/candidates/java" "$state/candidates/gradle"
+printf '%s\n' 'java,gradle' >"$state/var/candidates"
 cat >"$state/etc/config" <<'HOME_WEAVE_SDKMAN_CONFIG'
 sdkman_auto_answer=false
 sdkman_auto_complete=false
@@ -46,10 +42,38 @@ sdkman_native_enable=true
 sdkman_selfupdate_feature=false
 HOME_WEAVE_SDKMAN_CONFIG
 
-mkdir -p "$state/ext" "$state/tmp" \
-  "$state/candidates/java" "$state/candidates/gradle" "$state/candidates/coursier" \
-  "$state/candidates/sbt" "$state/candidates/scala" "$state/candidates/scalacli"
-printf '%s\n' 'java,gradle,coursier,sbt,scala,scalacli' >"$state/var/candidates"
+remove_managed_candidate() {
+  local candidate="$1" candidate_version="$2" candidate_link current_link target
+  candidate_link="$state/candidates/$candidate/$candidate_version"
+  current_link="$state/candidates/$candidate/current"
+  if [[ -L "$candidate_link" ]]; then
+    target="$(readlink "$candidate_link")"
+    case "$target" in
+      /nix/store/*) rm -f "$candidate_link" ;;
+    esac
+  fi
+  if [[ -L "$current_link" ]] \
+    && [[ "$(readlink "$current_link")" == "$candidate_version" ]]; then
+    rm -f "$current_link"
+  fi
+  rmdir "$state/candidates/$candidate" 2>/dev/null || true
+}
+
+if [[ -f "$state/var/home-weave-managed-candidates" ]]; then
+  while read -r managed_candidate managed_version; do
+    case "$managed_candidate:$managed_version" in
+      java:11.0.31-amzn|java:17.0.19-amzn|java:21.0.11-amzn|java:26.0.1-amzn|gradle:9.6.1) ;;
+      *) remove_managed_candidate "$managed_candidate" "$managed_version" ;;
+    esac
+  done <"$state/var/home-weave-managed-candidates"
+else
+  # Reconcile state created by the original full wrapper, which predates the
+  # managed-candidate manifest. Only fixed HomeWeave Nix-store links qualify.
+  remove_managed_candidate coursier 2.1.24
+  remove_managed_candidate sbt 2.0.1
+  remove_managed_candidate scala 3.8.4
+  remove_managed_candidate scalacli 1.15.0
+fi
 
 seed_candidate() {
   local candidate="$1" candidate_version="$2" candidate_path="$3" make_current="$4"
@@ -63,10 +87,6 @@ seed_candidate java 17.0.19-amzn @JAVA17@ false
 seed_candidate java 21.0.11-amzn @JAVA21@ true
 seed_candidate java 26.0.1-amzn @JAVA26@ false
 seed_candidate gradle 9.6.1 @GRADLE@ true
-seed_candidate coursier 2.1.24 @COURSIER@ true
-seed_candidate sbt 2.0.1 @SBT@ true
-seed_candidate scala 3.8.4 @SCALA@ true
-seed_candidate scalacli 1.15.0 @SCALA_CLI@ true
 
 cat >"$state/var/home-weave-managed-candidates" <<'HOME_WEAVE_MANAGED_CANDIDATES'
 java 11.0.31-amzn
@@ -74,10 +94,6 @@ java 17.0.19-amzn
 java 21.0.11-amzn
 java 26.0.1-amzn
 gradle 9.6.1
-coursier 2.1.24
-sbt 2.0.1
-scala 3.8.4
-scalacli 1.15.0
 HOME_WEAVE_MANAGED_CANDIDATES
 
 export SDKMAN_DIR="$state"

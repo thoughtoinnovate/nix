@@ -661,6 +661,69 @@
         "mainProgram": "sdk"
       }
     },
+    "home-weave-sdkman-java-runtime": {
+      "kind": "script",
+      "version": "5.23.0",
+      "scriptFile": "plugins/sdkman/sdkman-java-wrapper.sh",
+      "executableName": "sdk",
+      "runtimePackages": [
+        "bash",
+        "coreutils",
+        "curl",
+        "findutils",
+        "gnugrep",
+        "gnused",
+        "gawk",
+        "unzip",
+        "zip"
+      ],
+      "substitutions": {
+        "SDKMAN_CLI": { "package": "home-weave-sdkman-cli" },
+        "SDKMAN_NATIVE": { "package": "home-weave-sdkman-native" },
+        "JAVA11": { "package": "home-weave-sdkman-corretto11", "path": "Contents/Home" },
+        "JAVA17": { "package": "home-weave-sdkman-corretto17", "path": "Contents/Home" },
+        "JAVA21": { "package": "home-weave-sdkman-corretto21", "path": "Contents/Home" },
+        "JAVA26": { "package": "home-weave-sdkman-corretto26", "path": "Contents/Home" },
+        "GRADLE": { "package": "home-weave-sdkman-gradle" }
+      },
+      "meta": {
+        "description": "Pinned SDKMAN runtime seeded with Java and Gradle",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20",
+        "mainProgram": "sdk"
+      }
+    },
+    "home-weave-sdkman-java": {
+      "kind": "bundle",
+      "version": "5.23.0",
+      "members": ["home-weave-sdkman-java-runtime"],
+      "links": [
+        { "package": "home-weave-sdkman-gradle", "source": "bin/gradle", "target": "bin/gradle" },
+        { "package": "home-weave-sdkman-corretto11", "source": "Contents/Home", "target": "lib/jdks/corretto-11" },
+        { "package": "home-weave-sdkman-corretto17", "source": "Contents/Home", "target": "lib/jdks/corretto-17" },
+        { "package": "home-weave-sdkman-corretto21", "source": "Contents/Home", "target": "lib/jdks/corretto-21" },
+        { "package": "home-weave-sdkman-corretto26", "source": "Contents/Home", "target": "lib/jdks/corretto-26" }
+      ],
+      "meta": {
+        "description": "Pinned SDKMAN with Java and Gradle",
+        "homepage": "https://sdkman.io/",
+        "license": "licenses.asl20",
+        "mainProgram": "sdk"
+      },
+      "exposeBins": [
+        { "package": "home-weave-sdkman-corretto21", "path": "Contents/Home/bin" }
+      ],
+      "aliases": [
+        { "name": "java11", "package": "home-weave-sdkman-corretto11", "executable": "Contents/Home/bin/java" },
+        { "name": "java17", "package": "home-weave-sdkman-corretto17", "executable": "Contents/Home/bin/java" },
+        { "name": "java21", "package": "home-weave-sdkman-corretto21", "executable": "Contents/Home/bin/java" },
+        { "name": "java26", "package": "home-weave-sdkman-corretto26", "executable": "Contents/Home/bin/java" }
+      ],
+      "defaultJavaHome": { "package": "home-weave-sdkman-corretto21", "path": "Contents/Home" },
+      "environment": {
+        "JAVA_HOME": { "package": "home-weave-sdkman-corretto21", "path": "Contents/Home" }
+      }
+    },
     "home-weave-sdkman": {
       "kind": "bundle",
       "version": "5.23.0",

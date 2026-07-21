@@ -20,6 +20,7 @@
   "development": [
     "jq",
     "lazygit",
+    "opencode",
     "shellcheck",
     "shfmt",
     "tmux"
@@ -81,6 +82,7 @@
       "vscode-js-debug"
     ],
     "cloud": ["awscli2", "terraform", "kubectl", "minikube"],
+    "ai": ["opencode"],
     "desktop": ["vscode"]
   }
 }
