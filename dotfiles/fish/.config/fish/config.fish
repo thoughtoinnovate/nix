@@ -1,3 +1,16 @@
+set -l home_weave_brew
+if test -x /opt/homebrew/bin/brew
+    set home_weave_brew /opt/homebrew/bin/brew
+else if test -x /usr/local/bin/brew
+    set home_weave_brew /usr/local/bin/brew
+else if type -q brew
+    set home_weave_brew (command -s brew)
+end
+if test -n "$home_weave_brew"
+    eval ($home_weave_brew shellenv fish)
+end
+set -e home_weave_brew
+
 set home_weave_state_root $HOME/.local/state
 if set -q XDG_STATE_HOME
     set home_weave_state_root $XDG_STATE_HOME

@@ -49,8 +49,11 @@ write_layers
 run_composer zsh zsh,fish
 grep -Fq 'nix/profiles/home-weave/bin' "$TEST_HOME/.config/shell/common.sh"
 grep -Fq 'nix/profiles/home-weave/share/nvm' "$TEST_HOME/.config/shell/common.sh"
+grep -Fq '/opt/homebrew/bin/brew' "$TEST_HOME/.config/shell/common.sh"
+grep -Fq '/usr/local/bin/brew' "$TEST_HOME/.config/shell/common.sh"
 
 grep -Fq 'nix/profiles/home-weave/bin' "$TEST_HOME/.config/fish/config.fish"
+grep -Fq 'brew shellenv fish' "$TEST_HOME/.config/fish/config.fish"
 [[ -L "$TEST_HOME/.zshrc" ]]
 [[ -L "$TEST_HOME/.config/fish/config.fish" ]]
 [[ -L "$TEST_HOME/.config/nvim/init.lua" ]]
@@ -65,6 +68,7 @@ grep -Fqx personal "$TEST_HOME/.config/personal/config"
 write_layers
 run_composer nushell nushell x86_64-linux
 grep -Fq 'home_weave_profile_bin' "$TEST_HOME/.config/nushell/env.nu"
+grep -Fq 'HOMEBREW_PREFIX' "$TEST_HOME/.config/nushell/env.nu"
 [[ -L "$TEST_HOME/.config/nushell/config.nu" ]]
 [[ -s "$TEST_HOME/.local/share/nushell/vendor/autoload/starship.nu" ]]
 [[ -s "$TEST_HOME/.local/share/nushell/vendor/autoload/home-weave-env.nu" ]]

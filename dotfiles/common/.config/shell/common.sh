@@ -1,4 +1,20 @@
 # Shared POSIX-compatible interactive shell defaults. Keep secrets out of this file.
+# Homebrew formulae are native packages, not Nix profile entries. Import
+# Homebrew's official shell environment when it is present so their binaries
+# are available consistently in Terminal, IDE, and Nix-launched shells.
+HOME_WEAVE_BREW=""
+if [ -x /opt/homebrew/bin/brew ]; then
+  HOME_WEAVE_BREW=/opt/homebrew/bin/brew
+elif [ -x /usr/local/bin/brew ]; then
+  HOME_WEAVE_BREW=/usr/local/bin/brew
+elif command -v brew >/dev/null 2>&1; then
+  HOME_WEAVE_BREW="$(command -v brew)"
+fi
+if [ -n "$HOME_WEAVE_BREW" ]; then
+  eval "$("$HOME_WEAVE_BREW" shellenv sh)"
+fi
+unset HOME_WEAVE_BREW
+
 HOME_WEAVE_PROFILE_BIN="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-weave/bin"
 case ":$PATH:" in
   *":$HOME_WEAVE_PROFILE_BIN:"*) ;;

@@ -412,6 +412,10 @@ formulae/casks on macOS, configured official Debian/Ubuntu APT repositories,
 and official Arch Pacman repositories. Unknown Linux distributions remain
 Nixpkgs-only. Third-party taps, AUR, and third-party APT/Pacman repositories
 are rejected; privileged plans print the exact command before confirmation.
+When Homebrew is present, the shared shell configuration loads its official
+`shellenv` output (with equivalent Nushell environment setup). This makes
+declared Homebrew formulae available in Bash, Zsh, Fish, and Nushell without
+requiring a terminal-specific PATH configuration.
 
 For software whose vendor documents `curl ... | sh`, use the reusable
 `home-weave-verified-installer` framework instead of copying that pipeline.
