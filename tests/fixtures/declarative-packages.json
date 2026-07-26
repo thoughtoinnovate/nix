@@ -45,6 +45,21 @@
         "mainProgram": "example-tool"
       }
     },
+    "example-native-tree": {
+      "kind": "archive",
+      "version": "1.0.0",
+      "officialHosts": ["downloads.example.invalid"],
+      "artifacts": {
+        "x86_64-linux": {
+          "url": "https://downloads.example.invalid/example-native-tree.tar.gz",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "dynamicLinkerWrapper": true,
+          "dynamicLinkerExecutables": ["libexec/example-native-tree"],
+          "runtimeLibraries": ["stdenv.cc.cc.lib"],
+          "install": {"kind": "copy-tree"}
+        }
+      }
+    },
     "example-macos-app": {
       "kind": "archive",
       "version": "1.0.0",

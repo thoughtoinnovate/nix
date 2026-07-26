@@ -714,6 +714,34 @@
                     kind = "nixpkgs"; attr = "jq"; version = "0.0-invalid";
                   };
                 };
+                unsafeDynamicLinkerPath = evaluateCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    artifacts.${system} = {
+                      url = "https://official.invalid/tool.tar.gz";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
+                      dynamicLinkerExecutables = [ "../libexec/tool" ];
+                      runtimeLibraries =
+                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
+                          [ "stdenv.cc.cc.lib" ];
+                      install.kind = "copy-tree";
+                    };
+                  };
+                };
+                unwrappedDynamicLinkerPath = evaluateCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    artifacts.${system} = {
+                      url = "https://official.invalid/tool.tar.gz";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      dynamicLinkerExecutables = [ "libexec/tool" ];
+                      install.kind = "copy-tree";
+                    };
+                  };
+                };
                 extensionlessZip = packageForCatalog
                   (builtins.fromJSON (builtins.readFile ./tests/fixtures/extensionless-zip.json));
                 rawExecutable = packageForCatalog {
@@ -783,11 +811,34 @@
                     };
                   };
                 };
+                dynamicLinkerCopyTree = packageForCatalog {
+                  schemaVersion = 1;
+                  packages.policy-test = {
+                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    artifacts.${system} = {
+                      url = "https://official.invalid/tool.tar.gz";
+                      sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+                      dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
+                      dynamicLinkerExecutables =
+                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
+                          [ "libexec/tool" ];
+                      runtimeLibraries =
+                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
+                          [ "stdenv.cc.cc.lib" ];
+                      install = {
+                        kind = "copy-tree";
+                        destination = "share/tool";
+                      };
+                    };
+                  };
+                };
               in
               assert badHost.success == false;
               assert unsupported.success == false;
               assert legacyPlatforms.success == false;
               assert wrongVersion.success == false;
+              assert unsafeDynamicLinkerPath.success == false;
+              assert unwrappedDynamicLinkerPath.success == false;
               assert portableArtifact.src.url == "https://official.invalid/portable-tool.tar.gz";
               assert portableArtifact.sourceRoot == "portable-tool-1";
               assert portableArtifact.meta.platforms == nixpkgs.lib.platforms.all;
@@ -810,6 +861,16 @@
               assert !pkgs.stdenv.hostPlatform.isLinux
                 || nixpkgs.lib.hasInfix "$out/libexec/bin/tool"
                   dynamicLinkerExecutable.installPhase;
+              assert !pkgs.stdenv.hostPlatform.isLinux
+                || builtins.elem pkgs.stdenv.cc.cc.lib dynamicLinkerCopyTree.buildInputs;
+              assert !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix
+                  ''mv "$out/share/tool/libexec/tool" "$out/.home-weave-dynamic/share/tool/libexec/tool"''
+                  dynamicLinkerCopyTree.installPhase;
+              assert !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix
+                  ''"$out/.home-weave-dynamic/share/tool/libexec/tool" "\$@"''
+                  dynamicLinkerCopyTree.installPhase;
               pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
                 check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
                   ${./tests/fixtures/declarative-packages.json}

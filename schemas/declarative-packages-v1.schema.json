@@ -65,6 +65,15 @@
         "format": {"enum": ["archive", "zip", "gzip", "raw", "dmg"]},
         "sourceRoot": {"type": "string"},
         "dynamicLinkerWrapper": {"type": "boolean"},
+        "dynamicLinkerExecutables": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9+@%_.,/ -]+$"
+          },
+          "uniqueItems": true
+        },
         "runtimeLibraries": {
           "type": "array",
           "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9+._-]*(\\.[A-Za-z0-9+._-]+)*$"},

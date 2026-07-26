@@ -102,6 +102,48 @@ in
           installDestination = require (safeRelativePath (install.destination or "."))
             "Declarative package ${id} has an unsafe install destination"
             (install.destination or ".");
+          dynamicLinkerExecutablePaths =
+            let
+              paths = checkedPlatform.dynamicLinkerExecutables or [ ];
+              checkedPaths = map (path:
+                require (safeRelativePath path)
+                  "Declarative package ${id} has an unsafe dynamic-linker executable path"
+                  path
+              ) paths;
+            in
+            require (dynamicLinkerWrapper || paths == [ ])
+              "Declarative package ${id} declares dynamicLinkerExecutables without enabling dynamicLinkerWrapper"
+              (require (installKind == "copy-tree" || paths == [ ])
+                "Declarative package ${id} may declare dynamicLinkerExecutables only for copy-tree installs"
+                checkedPaths);
+          renderDynamicLinkerWrapper = target: realTarget: ''
+            mkdir -p "$out/${builtins.dirOf target}"
+            cat > "$out/${target}" <<HOME_WEAVE_DYNAMIC_LINKER
+            #!${final.runtimeShell}
+            exec ${dynamicLinker} \
+              --library-path ${lib.escapeShellArg runtimeLibraryPath} \
+              "$out/${realTarget}" "\$@"
+            HOME_WEAVE_DYNAMIC_LINKER
+            chmod 0555 "$out/${target}"
+          '';
+          copyTreeDynamicLinkerCommands =
+            lib.concatMapStringsSep "\n" (path:
+              let
+                target =
+                  if installDestination == "."
+                  then path
+                  else "${installDestination}/${path}";
+                realTarget = ".home-weave-dynamic/${target}";
+              in ''
+                if [[ ! -f "$out/${target}" ]]; then
+                  echo "Declarative package ${id} is missing dynamic-linker executable ${path}" >&2
+                  exit 1
+                fi
+                mkdir -p "$out/${builtins.dirOf realTarget}"
+                mv "$out/${target}" "$out/${realTarget}"
+                ${renderDynamicLinkerWrapper target realTarget}
+              ''
+            ) dynamicLinkerExecutablePaths;
           sourceRootValue = checkedPlatform.sourceRoot or null;
           executableCommands = lib.concatMapStringsSep "\n" (entry:
             let
@@ -112,14 +154,7 @@ in
             in
             if dynamicLinkerWrapper then ''
               install -Dm755 ${lib.escapeShellArg source} "$out/libexec/${target}"
-              mkdir -p "$out/${builtins.dirOf target}"
-              cat > "$out/${target}" <<HOME_WEAVE_DYNAMIC_LINKER
-              #!${final.runtimeShell}
-              exec ${dynamicLinker} \
-                --library-path ${lib.escapeShellArg runtimeLibraryPath} \
-                "$out/libexec/${target}" "\$@"
-              HOME_WEAVE_DYNAMIC_LINKER
-              chmod 0555 "$out/${target}"
+              ${renderDynamicLinkerWrapper target "libexec/${target}"}
             ''
             else
               ''install -Dm755 ${lib.escapeShellArg source} "$out/${target}"''
@@ -150,6 +185,7 @@ in
               runHook preInstall
               mkdir -p "$out/${installDestination}"
               cp -R . "$out/${installDestination}/"
+              ${copyTreeDynamicLinkerCommands}
               runHook postInstall
             ''
             else if installKind == "executables" then ''
