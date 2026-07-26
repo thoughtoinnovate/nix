@@ -802,7 +802,15 @@ select_package_groups() {
   local rows=() selectable_groups=() selected_groups=() requested_groups=() tokens=()
   catalog="$(nix --extra-experimental-features 'nix-command flakes' \
     eval --json "$BASE_URL#lib.packageCatalog.groups" 2>/dev/null || printf '{}')"
-  [[ "$(jq -r 'type' <<<"$catalog")" == object ]] || return 0
+  if [[ "$(jq -r 'type' <<<"$catalog")" != object ]] \
+    || [[ "$(jq -r 'length' <<<"$catalog")" == 0 ]]; then
+    if ((${#REQUESTED_GROUPS[@]} > 0)); then
+      printf 'Package catalog metadata is unavailable; validating explicit groups locally.\n'
+      printf 'Selected package groups from --group: %s\n' \
+        "$(IFS=', '; printf '%s' "${REQUESTED_GROUPS[*]}")"
+    fi
+    return 0
+  fi
   load_default_package_ids
 
   group_is_inherited() {
