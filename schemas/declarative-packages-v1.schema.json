@@ -64,7 +64,7 @@
         "sha256": {"type": "string", "pattern": "^sha256-"},
         "format": {"enum": ["archive", "zip", "gzip", "raw", "dmg"]},
         "sourceRoot": {"type": "string"},
-        "autoPatchelf": {"type": "boolean"},
+        "dynamicLinkerWrapper": {"type": "boolean"},
         "runtimeLibraries": {
           "type": "array",
           "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9+._-]*(\\.[A-Za-z0-9+._-]+)*$"},

@@ -73,15 +73,17 @@ in
             "Declarative package ${id} URL must use HTTPS and a reviewed official host"
             url;
           format = checkedPlatform.format or "archive";
-          autoPatchelf = require
-            (!(checkedPlatform.autoPatchelf or false) || final.stdenv.hostPlatform.isLinux)
-            "Declarative package ${id} may enable autoPatchelf only on Linux artifacts"
-            (checkedPlatform.autoPatchelf or false);
+          dynamicLinkerWrapper = require
+            (!(checkedPlatform.dynamicLinkerWrapper or false) || final.stdenv.hostPlatform.isLinux)
+            "Declarative package ${id} may enable dynamicLinkerWrapper only on Linux artifacts"
+            (checkedPlatform.dynamicLinkerWrapper or false);
           runtimeLibraryNames = checkedPlatform.runtimeLibraries or [ ];
           runtimeLibraries = require
-            (autoPatchelf || runtimeLibraryNames == [ ])
-            "Declarative package ${id} declares runtimeLibraries without enabling autoPatchelf"
+            (dynamicLinkerWrapper || runtimeLibraryNames == [ ])
+            "Declarative package ${id} declares runtimeLibraries without enabling dynamicLinkerWrapper"
             (map (name: attrByName final name) runtimeLibraryNames);
+          dynamicLinker = final.stdenv.cc.bintools.dynamicLinker;
+          runtimeLibraryPath = lib.makeLibraryPath runtimeLibraries;
           # Some official broker endpoints return an archive from a URL whose
           # final path component has no suffix. Give explicitly typed sources
           # a deterministic filename so Nix's unpack phase selects the right
@@ -108,7 +110,19 @@ in
               target = require (safeRelativePath (entry.target or ""))
                 "Declarative package ${id} has an unsafe executable target" entry.target;
             in
-            ''install -Dm755 ${lib.escapeShellArg source} "$out/${target}"''
+            if dynamicLinkerWrapper then ''
+              install -Dm755 ${lib.escapeShellArg source} "$out/libexec/${target}"
+              mkdir -p "$out/${builtins.dirOf target}"
+              cat > "$out/${target}" <<HOME_WEAVE_DYNAMIC_LINKER
+              #!${final.runtimeShell}
+              exec ${dynamicLinker} \
+                --library-path ${lib.escapeShellArg runtimeLibraryPath} \
+                "$out/libexec/${target}" "\$@"
+              HOME_WEAVE_DYNAMIC_LINKER
+              chmod 0555 "$out/${target}"
+            ''
+            else
+              ''install -Dm755 ${lib.escapeShellArg source} "$out/${target}"''
           ) (install.files or [ ]);
           gzipOutput =
             if (install.files or [ ]) == [ ] then id
@@ -195,8 +209,7 @@ in
             inherit version src installPhase passthru;
             nativeBuildInputs = lib.optionals (format == "zip") [ prev.unzip ]
               ++ lib.optionals (format == "gzip") [ prev.gzip ]
-              ++ lib.optionals (format == "dmg") [ prev.undmg ]
-              ++ lib.optionals autoPatchelf [ prev.autoPatchelfHook ];
+              ++ lib.optionals (format == "dmg") [ prev.undmg ];
             buildInputs = runtimeLibraries;
             dontUnpack = format == "raw" || format == "gzip";
             # Declarative archives are already-built, checksum-pinned

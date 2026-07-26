@@ -765,14 +765,14 @@
                     };
                   };
                 };
-                autoPatchelfExecutable = packageForCatalog {
+                dynamicLinkerExecutable = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
                     kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-                      autoPatchelf = pkgs.stdenv.hostPlatform.isLinux;
+                      dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
                       runtimeLibraries =
                         nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
                           [ "stdenv.cc.cc.lib" ];
@@ -803,9 +803,13 @@
               assert !pkgs.stdenv.hostPlatform.isDarwin
                 || nixpkgs.lib.hasInfix "/usr/bin/xattr -cr" dmgCliApplication.installPhase;
               assert !pkgs.stdenv.hostPlatform.isLinux
-                || builtins.elem pkgs.autoPatchelfHook autoPatchelfExecutable.nativeBuildInputs;
+                || builtins.elem pkgs.stdenv.cc.cc.lib dynamicLinkerExecutable.buildInputs;
               assert !pkgs.stdenv.hostPlatform.isLinux
-                || builtins.elem pkgs.stdenv.cc.cc.lib autoPatchelfExecutable.buildInputs;
+                || nixpkgs.lib.hasInfix "--library-path"
+                  dynamicLinkerExecutable.installPhase;
+              assert !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix "$out/libexec/bin/tool"
+                  dynamicLinkerExecutable.installPhase;
               pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
                 check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
                   ${./tests/fixtures/declarative-packages.json}
