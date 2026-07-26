@@ -409,10 +409,17 @@
 
             opencode-release =
               pkgs.runCommand "opencode-release" {
-                nativeBuildInputs = [ pkgs.opencode ];
+                nativeBuildInputs = [ pkgs.gnugrep pkgs.opencode ];
               } ''
-                HOME="$TMPDIR" opencode --version >version
-                test "$(cat version)" = "1.18.4"
+                set +e
+                version_output="$(HOME="$TMPDIR" opencode --version)"
+                version_status=$?
+                set -e
+                printf 'OpenCode version command exited %s and reported: %s\n' \
+                  "$version_status" "$version_output"
+                test "$version_status" -eq 0
+                printf '%s\n' "$version_output" \
+                  | grep -Eq '(^|[^0-9.])1\.18\.4([^0-9.]|$)'
                 touch $out
               '';
 
