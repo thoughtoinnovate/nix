@@ -26,6 +26,16 @@
             "kind": "executables",
             "files": [{"source": "example-tool", "target": "bin/example-tool"}]
           }
+        },
+        "x86_64-linux": {
+          "url": "https://downloads.example.invalid/example-tool-linux.tar.gz",
+          "sha256": "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "autoPatchelf": true,
+          "runtimeLibraries": ["stdenv.cc.cc.lib"],
+          "install": {
+            "kind": "executables",
+            "files": [{"source": "example-tool", "target": "bin/example-tool"}]
+          }
         }
       },
       "meta": {

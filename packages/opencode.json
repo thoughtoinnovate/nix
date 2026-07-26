@@ -24,12 +24,16 @@
           "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-arm64.tar.gz",
           "sha256": "sha256-66h++6OXbVM6JMygMW+O83W1+OeXwKlcJe6RlwC3ujU=",
           "sourceRoot": ".",
+          "autoPatchelf": true,
+          "runtimeLibraries": ["stdenv.cc.cc.lib"],
           "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
         },
         "x86_64-linux": {
           "url": "https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-x64.tar.gz",
           "sha256": "sha256-urRjw/syJNOIu3z61j84cD35zwviz9LOjLSdiGtToXQ=",
           "sourceRoot": ".",
+          "autoPatchelf": true,
+          "runtimeLibraries": ["stdenv.cc.cc.lib"],
           "install": { "kind": "executables", "files": [{ "source": "opencode", "target": "bin/opencode" }] }
         }
       },

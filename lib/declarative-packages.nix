@@ -73,6 +73,15 @@ in
             "Declarative package ${id} URL must use HTTPS and a reviewed official host"
             url;
           format = checkedPlatform.format or "archive";
+          autoPatchelf = require
+            (!(checkedPlatform.autoPatchelf or false) || final.stdenv.hostPlatform.isLinux)
+            "Declarative package ${id} may enable autoPatchelf only on Linux artifacts"
+            (checkedPlatform.autoPatchelf or false);
+          runtimeLibraryNames = checkedPlatform.runtimeLibraries or [ ];
+          runtimeLibraries = require
+            (autoPatchelf || runtimeLibraryNames == [ ])
+            "Declarative package ${id} declares runtimeLibraries without enabling autoPatchelf"
+            (map (name: attrByName final name) runtimeLibraryNames);
           # Some official broker endpoints return an archive from a URL whose
           # final path component has no suffix. Give explicitly typed sources
           # a deterministic filename so Nix's unpack phase selects the right
@@ -186,7 +195,9 @@ in
             inherit version src installPhase passthru;
             nativeBuildInputs = lib.optionals (format == "zip") [ prev.unzip ]
               ++ lib.optionals (format == "gzip") [ prev.gzip ]
-              ++ lib.optionals (format == "dmg") [ prev.undmg ];
+              ++ lib.optionals (format == "dmg") [ prev.undmg ]
+              ++ lib.optionals autoPatchelf [ prev.autoPatchelfHook ];
+            buildInputs = runtimeLibraries;
             dontUnpack = format == "raw" || format == "gzip";
             # Declarative archives are already-built, checksum-pinned
             # artifacts. Never invoke an incidental configure script or
