@@ -613,6 +613,10 @@ override a weaker system daemon configuration. Administrators should set
 `/etc/nix/nix.conf`; HomeWeave still fixes its own substituter list to the
 official cache.
 
+## License
+
+HomeWeave is available under the [MIT License](./LICENSE).
+
 ## Lifecycle
 
 The supported package outputs are `terminal-tools` and `development-tools`. The installer

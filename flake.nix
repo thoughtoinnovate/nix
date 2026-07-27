@@ -58,7 +58,10 @@
         nvm = nvmPlugin;
       };
       baseOverlay = nixpkgs.lib.composeManyExtensions [
-        rawBaseOverlay sdkmanPlugin.overlay nvmPlugin.overlay opencodeOverlay
+        rawBaseOverlay
+        sdkmanPlugin.overlay
+        nvmPlugin.overlay
+        opencodeOverlay
       ];
       defaultProfileManifest = builtins.fromJSON (builtins.readFile ./templates/profile/home-weave.json);
       defaultCoreManifest = defaultProfileManifest // {
@@ -68,13 +71,24 @@
             extends = null;
             shells = [ "zsh" ];
             primaryShell = "zsh";
-            dotfiles = [ "common" "starship" "ghostty" "nvim" "shells" ];
+            dotfiles = [
+              "common"
+              "starship"
+              "ghostty"
+              "nvim"
+              "shells"
+            ];
             packages.nix = publicPackageCatalog.base;
           };
           development = {
             extends = "base";
             development = true;
-            shells = [ "bash" "fish" "zsh" "nushell" ];
+            shells = [
+              "bash"
+              "fish"
+              "zsh"
+              "nushell"
+            ];
             primaryShell = "zsh";
             packageGroups = [ ];
             dotfiles = [ ];
@@ -89,27 +103,47 @@
               allowRuntimeChanges = true;
               candidates = {
                 java = [
-                  { version = "11.0.31-amzn"; default = false; }
-                  { version = "17.0.19-amzn"; default = false; }
-                  { version = "21.0.11-amzn"; default = true; }
-                  { version = "26.0.1-amzn"; default = false; }
+                  {
+                    version = "11.0.31-amzn";
+                    default = false;
+                  }
+                  {
+                    version = "17.0.19-amzn";
+                    default = false;
+                  }
+                  {
+                    version = "21.0.11-amzn";
+                    default = true;
+                  }
+                  {
+                    version = "26.0.1-amzn";
+                    default = false;
+                  }
                 ];
-                gradle = [ { version = "9.6.1"; default = true; } ];
+                gradle = [
+                  {
+                    version = "9.6.1";
+                    default = true;
+                  }
+                ];
               };
             };
           };
         };
       };
-      defaultResolvedBySystem = nixpkgs.lib.genAttrs
-        [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
-        (system: profileConfig.resolve {
-          config = defaultCoreManifest;
-          sourceRoot = self.outPath;
-          sourceName = "home-weave-core";
-          packageCatalog = publicPackageCatalog;
-          pluginRegistry = publicPlugins;
-          inherit system;
-        });
+      defaultResolvedBySystem =
+        nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
+          (
+            system:
+            profileConfig.resolve {
+              config = defaultCoreManifest;
+              sourceRoot = self.outPath;
+              sourceName = "home-weave-core";
+              packageCatalog = publicPackageCatalog;
+              pluginRegistry = publicPlugins;
+              inherit system;
+            }
+          );
       # nixpkgs-unstable's Darwin linker fix landed before its Starship output
       # reached cache.nixos.org. Use the final supported Darwin channel's
       # cache-backed Starship until the unstable output is substituted.
@@ -139,9 +173,17 @@
             config.allowUnsupportedSystem = true;
           };
           extensionJson = builtins.toJSON extensions;
-          pluginJson = builtins.toJSON (nixpkgs.lib.mapAttrs (_: plugin: {
-            inherit (plugin) schemaVersion name kind platforms lifecycle;
-          }) plugins);
+          pluginJson = builtins.toJSON (
+            nixpkgs.lib.mapAttrs (_: plugin: {
+              inherit (plugin)
+                schemaVersion
+                name
+                kind
+                platforms
+                lifecycle
+                ;
+            }) plugins
+          );
           wrapper = appPkgs.writeShellApplication {
             name = "home-weave";
             runtimeInputs = [ appPkgs.home-weave-cli ];
@@ -151,7 +193,9 @@
               export HOME_WEAVE_EXTENSIONS_JSON=${nixpkgs.lib.escapeShellArg extensionJson}
               export HOME_WEAVE_PLUGINS_JSON=${nixpkgs.lib.escapeShellArg pluginJson}
               ${nixpkgs.lib.optionalString (profileOverlay != null) ''
-                export HOME_WEAVE_PROFILE_OVERLAY=${nixpkgs.lib.escapeShellArg (toString profileOverlay)}
+                # Interpolate the path before quoting it so Nix retains the
+                # profile source in the launcher's runtime closure.
+                export HOME_WEAVE_PROFILE_OVERLAY=${nixpkgs.lib.escapeShellArg "${profileOverlay}"}
               ''}
               exec home-weave "$@"
             '';
@@ -165,7 +209,13 @@
       mkHomeWeaveDistribution = import ./lib/distribution.nix {
         lib = nixpkgs.lib;
         core = self;
-        inherit nixpkgs profileConfig publicPackageCatalog declarativePackages mkHomeWeaveApp;
+        inherit
+          nixpkgs
+          profileConfig
+          publicPackageCatalog
+          declarativePackages
+          mkHomeWeaveApp
+          ;
         profileConfigSchema = ./schemas/home-weave-v4.schema.json;
         declarativePackageSchema = ./schemas/declarative-packages-v1.schema.json;
         nixpkgs-x86-darwin = inputs.nixpkgs-x86-darwin;
@@ -202,17 +252,27 @@
             config.allowUnfreePredicate = pkg: packageSource.lib.getName pkg == "claude-code";
             config.allowUnsupportedSystem = true;
           };
-          packageFor = packageSet: name:
+          packageFor =
+            packageSet: name:
             nixpkgs.lib.attrByPath (nixpkgs.lib.splitString "." name)
-              (throw "HomeWeave package is unavailable: ${name}") packageSet;
-          profileEnvironments = nixpkgs.lib.mapAttrs (name: profile:
+              (throw "HomeWeave package is unavailable: ${name}")
+              packageSet;
+          profileEnvironments = nixpkgs.lib.mapAttrs (
+            name: profile:
             pkgs.buildEnv {
               name = "home-weave-${name}-environment";
-              paths = map (packageFor pkgs) profile.nixPackages
+              paths =
+                map (packageFor pkgs) profile.nixPackages
                 ++ map (shell: pkgs.shellPackages.${shell}) profile.shells;
             }
           ) defaultResolvedBySystem.${system}.profiles;
           defaultProfileName = defaultResolvedBySystem.${system}.defaults.profile;
+          profileOverlayFixture = ./templates/distribution/profile-overlay;
+          profileOverlayFixtureApp = mkHomeWeaveApp {
+            inherit system packageSource;
+            profileOverlay = profileOverlayFixture;
+          };
+          profileOverlayFixtureRoot = builtins.dirOf (builtins.dirOf profileOverlayFixtureApp.program);
         in
         {
           packages = {
@@ -233,8 +293,9 @@
             inherit (pkgs) home-weave-sdkman home-weave-sdkman-java;
 
             default = pkgs.development-tools;
-          } // nixpkgs.lib.mapAttrs' (name: environment:
-            nixpkgs.lib.nameValuePair "home-weave-environment-${name}" environment
+          }
+          // nixpkgs.lib.mapAttrs' (
+            name: environment: nixpkgs.lib.nameValuePair "home-weave-environment-${name}" environment
           ) profileEnvironments;
 
           apps = {
@@ -280,21 +341,45 @@
           formatter = pkgs.nixfmt;
 
           checks = {
+            profile-overlay-runtime-closure =
+              pkgs.runCommand "profile-overlay-runtime-closure"
+                {
+                  nativeBuildInputs = with pkgs; [
+                    gnugrep
+                    nix
+                  ];
+                }
+                ''
+                  test -d ${profileOverlayFixture}
+                  nix-store -q --references ${profileOverlayFixtureRoot} \
+                    | grep -Fx ${profileOverlayFixture}
+                  touch $out
+                '';
+
             profile-config =
               let
                 fixturePlugin = {
                   schemaVersion = 1;
                   name = "fixture-plugin";
-                  platforms = [ "aarch64-darwin" "x86_64-linux" ];
-                  lifecycle = { packages = "retain"; state = "remove"; };
+                  platforms = [
+                    "aarch64-darwin"
+                    "x86_64-linux"
+                  ];
+                  lifecycle = {
+                    packages = "retain";
+                    state = "remove";
+                  };
                   resolve = { selection, ... }: {
                     nixPackages = [ "plugin-tool" ];
-                    providerPackages = { example = selection.items; };
+                    providerPackages = {
+                      example = selection.items;
+                    };
                   };
                 };
-                fixturePlugins = publicPlugins // { fixture-plugin = fixturePlugin; };
-                fixture = builtins.fromJSON
-                  (builtins.readFile ./tests/fixtures/profile-inheritance.json);
+                fixturePlugins = publicPlugins // {
+                  fixture-plugin = fixturePlugin;
+                };
+                fixture = builtins.fromJSON (builtins.readFile ./tests/fixtures/profile-inheritance.json);
                 darwin = profileConfig.resolve {
                   config = fixture;
                   sourceRoot = ./tests/fixtures;
@@ -311,8 +396,9 @@
                   packageCatalog = publicPackageCatalog;
                   pluginRegistry = fixturePlugins;
                 };
-                strictDarwinFixture = builtins.fromJSON
-                  (builtins.readFile ./tests/fixtures/profile-strict-darwin.json);
+                strictDarwinFixture = builtins.fromJSON (
+                  builtins.readFile ./tests/fixtures/profile-strict-darwin.json
+                );
                 strictDarwin = profileConfig.resolve {
                   config = strictDarwinFixture;
                   sourceRoot = ./tests/fixtures;
@@ -321,8 +407,9 @@
                   packageCatalog = publicPackageCatalog;
                   pluginRegistry = publicPlugins;
                 };
-                strictLinuxFixture = builtins.fromJSON
-                  (builtins.readFile ./tests/fixtures/profile-strict-linux.json);
+                strictLinuxFixture = builtins.fromJSON (
+                  builtins.readFile ./tests/fixtures/profile-strict-linux.json
+                );
                 strictLinux = profileConfig.resolve {
                   config = strictLinuxFixture;
                   sourceRoot = ./tests/fixtures;
@@ -331,19 +418,30 @@
                   packageCatalog = publicPackageCatalog;
                   pluginRegistry = publicPlugins;
                 };
-                invalidExclusion = builtins.tryEval (builtins.deepSeq
-                  (profileConfig.resolve {
-                    config = builtins.fromJSON
-                      (builtins.readFile ./tests/fixtures/profile-invalid-exclusion.json);
-                    sourceRoot = ./tests/fixtures;
-                    sourceName = "invalid-fixture";
-                    system = "aarch64-darwin";
-                    packageCatalog = publicPackageCatalog;
-                    pluginRegistry = publicPlugins;
-                  }).profiles.minimal.nixPackages true);
+                invalidExclusion = builtins.tryEval (
+                  builtins.deepSeq
+                    (profileConfig.resolve {
+                      config = builtins.fromJSON (builtins.readFile ./tests/fixtures/profile-invalid-exclusion.json);
+                      sourceRoot = ./tests/fixtures;
+                      sourceName = "invalid-fixture";
+                      system = "aarch64-darwin";
+                      packageCatalog = publicPackageCatalog;
+                      pluginRegistry = publicPlugins;
+                    }).profiles.minimal.nixPackages
+                    true
+                );
               in
-              assert darwin.profiles.child.dotfiles == [ "common" "work-nvim" ];
-              assert darwin.profiles.child.nixPackages == [ "claude-code" "ripgrep" "plugin-tool" ];
+              assert
+                darwin.profiles.child.dotfiles == [
+                  "common"
+                  "work-nvim"
+                ];
+              assert
+                darwin.profiles.child.nixPackages == [
+                  "claude-code"
+                  "ripgrep"
+                  "plugin-tool"
+                ];
               assert darwin.profiles.child.allowUnfree == [ "claude-code" ];
               assert darwin.profiles.child.nativePackages.homebrewFormulae == [ "vault" ];
               assert darwin.profiles.child.providerPackages.example == [ "approved-app" ];
@@ -351,10 +449,11 @@
               assert !(builtins.elem "plugin-tool" darwin.profiles.disabled.nixPackages);
               assert darwin.profiles.disabled.providerPackages == { };
               assert darwin.profiles.disabled.pluginContributions == { };
-              assert map (layer: layer.name) darwin.profiles.child.dotfileLayers == [
-                "fixture--base"
-                "fixture--child"
-              ];
+              assert
+                map (layer: layer.name) darwin.profiles.child.dotfileLayers == [
+                  "fixture--base"
+                  "fixture--child"
+                ];
               assert linux.profiles.child.nativePackages.apt == [ "curl" ];
               assert strictDarwin.profiles.minimal.nixPackages == [ ];
               assert strictDarwin.profiles.minimal.dotfiles == [ ];
@@ -364,19 +463,26 @@
               assert strictLinux.profiles.minimal.nativePackages.apt == [ ];
               assert strictLinux.profiles.minimal.nativePackages.pacman == [ ];
               assert invalidExclusion.success == false;
-              pkgs.runCommand "profile-config" { nativeBuildInputs = [ pkgs.jq pkgs.check-jsonschema ]; } ''
-                jq -e . ${./schemas/home-weave-v4.schema.json} >/dev/null
-                check-jsonschema --schemafile ${./schemas/home-weave-v4.schema.json} \
-                  ${./templates/profile/home-weave.json} \
-                  ${./templates/distribution/profile-overlay/home-weave.json} \
-                  ${./tests/fixtures/profile-inheritance.json} \
-                  ${./tests/fixtures/profile-strict-darwin.json} \
-                  ${./tests/fixtures/profile-strict-linux.json} \
-                  ${./tests/fixtures/profile-invalid-exclusion.json}
-                check-jsonschema --schemafile ${./schemas/package-catalog-v1.schema.json} \
-                  ${./catalogs/packages.json}
-                touch $out
-              '';
+              pkgs.runCommand "profile-config"
+                {
+                  nativeBuildInputs = [
+                    pkgs.jq
+                    pkgs.check-jsonschema
+                  ];
+                }
+                ''
+                  jq -e . ${./schemas/home-weave-v4.schema.json} >/dev/null
+                  check-jsonschema --schemafile ${./schemas/home-weave-v4.schema.json} \
+                    ${./templates/profile/home-weave.json} \
+                    ${./templates/distribution/profile-overlay/home-weave.json} \
+                    ${./tests/fixtures/profile-inheritance.json} \
+                    ${./tests/fixtures/profile-strict-darwin.json} \
+                    ${./tests/fixtures/profile-strict-linux.json} \
+                    ${./tests/fixtures/profile-invalid-exclusion.json}
+                  check-jsonschema --schemafile ${./schemas/package-catalog-v1.schema.json} \
+                    ${./catalogs/packages.json}
+                  touch $out
+                '';
 
             overlay-evaluation =
               assert pkgs ? terminal-tools;
@@ -400,74 +506,103 @@
               '';
 
             nvm-shell-integration =
-              pkgs.runCommand "nvm-shell-integration" {
-                nativeBuildInputs = [ pkgs.bash pkgs.coreutils pkgs.zsh ];
-              } ''
-                bash ${./tests/test-nvm-plugin.sh} ${./plugins/nvm/shell-init.sh}
-                touch $out
-              '';
+              pkgs.runCommand "nvm-shell-integration"
+                {
+                  nativeBuildInputs = [
+                    pkgs.bash
+                    pkgs.coreutils
+                    pkgs.zsh
+                  ];
+                }
+                ''
+                  bash ${./tests/test-nvm-plugin.sh} ${./plugins/nvm/shell-init.sh}
+                  touch $out
+                '';
 
             opencode-release =
-              pkgs.runCommand "opencode-release" {
-                nativeBuildInputs = [ pkgs.gnugrep pkgs.opencode ];
-              } ''
-                set +e
-                version_output="$(HOME="$TMPDIR" opencode --version)"
-                version_status=$?
-                set -e
-                printf 'OpenCode version command exited %s and reported: %s\n' \
-                  "$version_status" "$version_output"
-                test "$version_status" -eq 0
-                printf '%s\n' "$version_output" \
-                  | grep -Eq '(^|[^0-9.])1\.18\.4([^0-9.]|$)'
-                touch $out
-              '';
+              pkgs.runCommand "opencode-release"
+                {
+                  nativeBuildInputs = [
+                    pkgs.gnugrep
+                    pkgs.opencode
+                  ];
+                }
+                ''
+                  set +e
+                  version_output="$(HOME="$TMPDIR" opencode --version)"
+                  version_status=$?
+                  set -e
+                  printf 'OpenCode version command exited %s and reported: %s\n' \
+                    "$version_status" "$version_output"
+                  test "$version_status" -eq 0
+                  printf '%s\n' "$version_output" \
+                    | grep -Eq '(^|[^0-9.])1\.18\.4([^0-9.]|$)'
+                  touch $out
+                '';
 
             sdkman-java-integration =
-              pkgs.runCommand "sdkman-java-integration" {
-                nativeBuildInputs = [ pkgs.home-weave-sdkman-java ];
-              } ''
-                state="$TMPDIR/sdkman-state"
-                mkdir -p "$state/candidates/scala"
-                ln -s /nix/store/home-weave-obsolete-scala "$state/candidates/scala/3.8.4"
-                ln -s 3.8.4 "$state/candidates/scala/current"
-                HOME_WEAVE_SDKMAN_STATE="$state" sdk version >/dev/null
-                test -d "$state/candidates/java"
-                test -d "$state/candidates/gradle"
-                test ! -e "$state/candidates/scala/3.8.4"
-                test ! -e "$state/candidates/scala/current"
-                test "$(cut -d' ' -f1 "$state/var/home-weave-managed-candidates" | sort -u | tr '\n' ' ')" = "gradle java "
-                test -x ${pkgs.home-weave-sdkman-java}/bin/java
-                test -x ${pkgs.home-weave-sdkman-java}/bin/gradle
-                touch $out
-              '';
+              pkgs.runCommand "sdkman-java-integration"
+                {
+                  nativeBuildInputs = [ pkgs.home-weave-sdkman-java ];
+                }
+                ''
+                  state="$TMPDIR/sdkman-state"
+                  mkdir -p "$state/candidates/scala"
+                  ln -s /nix/store/home-weave-obsolete-scala "$state/candidates/scala/3.8.4"
+                  ln -s 3.8.4 "$state/candidates/scala/current"
+                  HOME_WEAVE_SDKMAN_STATE="$state" sdk version >/dev/null
+                  test -d "$state/candidates/java"
+                  test -d "$state/candidates/gradle"
+                  test ! -e "$state/candidates/scala/3.8.4"
+                  test ! -e "$state/candidates/scala/current"
+                  test "$(cut -d' ' -f1 "$state/var/home-weave-managed-candidates" | sort -u | tr '\n' ' ')" = "gradle java "
+                  test -x ${pkgs.home-weave-sdkman-java}/bin/java
+                  test -x ${pkgs.home-weave-sdkman-java}/bin/gradle
+                  touch $out
+                '';
 
             package-environment-evaluation =
               assert builtins.elem "home-weave-nvm"
                 defaultResolvedBySystem.${system}.profiles.development.nixPackages;
-              assert builtins.elem "opencode"
-                defaultResolvedBySystem.${system}.profiles.development.nixPackages;
+              assert builtins.elem "opencode" defaultResolvedBySystem.${system}.profiles.development.nixPackages;
               assert builtins.elem "home-weave-sdkman-java"
                 defaultResolvedBySystem.${system}.profiles.development.nixPackages;
-              assert !(builtins.elem "home-weave-sdkman"
-                defaultResolvedBySystem.${system}.profiles.development.nixPackages);
-              assert defaultResolvedBySystem.${system}.profiles.development.shells
-                == [ "bash" "fish" "zsh" "nushell" ];
-              assert builtins.attrNames defaultResolvedBySystem.${system}.profiles.development
-                .pluginContributions.sdkman.metadata.candidates == [ "gradle" "java" ];
+              assert
+                !(builtins.elem "home-weave-sdkman"
+                  defaultResolvedBySystem.${system}.profiles.development.nixPackages
+                );
+              assert
+                defaultResolvedBySystem.${system}.profiles.development.shells == [
+                  "bash"
+                  "fish"
+                  "zsh"
+                  "nushell"
+                ];
+              assert
+                builtins.attrNames
+                  defaultResolvedBySystem.${system}.profiles.development.pluginContributions.sdkman.metadata.candidates
+                == [
+                  "gradle"
+                  "java"
+                ];
               assert publicPackageCatalog.groups.ai == [ "opencode" ];
-              assert defaultResolvedBySystem.${system}.profiles.development
-                .pluginContributions.nvm.metadata.shellSupport == [ "bash" "zsh" ];
-              assert defaultResolvedBySystem.${system}.profiles.development
-                .pluginContributions.nvm.lifecycle.state == "retain";
-              assert defaultResolvedBySystem.${system}.profiles.development
-                .pluginContributions.nvm.statePaths == [ ];
-              builtins.deepSeq (map (environment: environment.drvPath)
-                (builtins.attrValues profileEnvironments)) (
-              pkgs.runCommand "package-environment-evaluation" { } ''
-                touch $out
-              ''
-            );
+              assert
+                defaultResolvedBySystem.${system}.profiles.development.pluginContributions.nvm.metadata.shellSupport
+                == [
+                  "bash"
+                  "zsh"
+                ];
+              assert
+                defaultResolvedBySystem.${system}.profiles.development.pluginContributions.nvm.lifecycle.state
+                == "retain";
+              assert
+                defaultResolvedBySystem.${system}.profiles.development.pluginContributions.nvm.statePaths == [ ];
+              builtins.deepSeq (map (environment: environment.drvPath) (builtins.attrValues profileEnvironments))
+                (
+                  pkgs.runCommand "package-environment-evaluation" { } ''
+                    touch $out
+                  ''
+                );
 
             unfree-profile-evaluation = builtins.deepSeq unfreePkgs.claude-code.drvPath (
               pkgs.runCommand "unfree-profile-evaluation" { } ''
@@ -538,7 +673,10 @@
             guided-scaffold =
               pkgs.runCommand "guided-scaffold-tests"
                 {
-                  nativeBuildInputs = with pkgs; [ bash gnugrep ];
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    gnugrep
+                  ];
                 }
                 ''
                   bash ${./tests/test-guided-scaffold.sh} \
@@ -550,7 +688,10 @@
             ci-entrypoints =
               pkgs.runCommand "ci-entrypoint-tests"
                 {
-                  nativeBuildInputs = with pkgs; [ bash gnugrep ];
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    gnugrep
+                  ];
                 }
                 ''
                   bash ${./tests/test-ci-entrypoints.sh} \
@@ -566,7 +707,10 @@
             native-provider =
               pkgs.runCommand "native-provider-tests"
                 {
-                  nativeBuildInputs = with pkgs; [ bash gnused ];
+                  nativeBuildInputs = with pkgs; [
+                    bash
+                    gnused
+                  ];
                 }
                 ''
                   bash ${./tests/test-native-provider.sh} ${./lib/native-provider.sh}
@@ -621,7 +765,12 @@
             install-no-casks =
               pkgs.runCommand "install-no-casks-tests"
                 {
-                  nativeBuildInputs = with pkgs; [ coreutils gnused jq rsync ];
+                  nativeBuildInputs = with pkgs; [
+                    coreutils
+                    gnused
+                    jq
+                    rsync
+                  ];
                 }
                 ''
                   bash ${./tests/test-install-no-casks.sh} \
@@ -649,19 +798,29 @@
 
             declarative-package-policy =
               let
-                packageForCatalog = catalog:
-                  let candidate = import packageSource {
-                    inherit system;
-                    overlays = [ (declarativePackages.mkOverlay { inherit catalog; sourceRoot = ./.; }) ];
-                    config.allowUnsupportedSystem = true;
-                  };
-                  in candidate.policy-test;
-                evaluateCatalog = catalog:
-                  builtins.tryEval (builtins.deepSeq (packageForCatalog catalog).drvPath true);
+                packageForCatalog =
+                  catalog:
+                  let
+                    candidate = import packageSource {
+                      inherit system;
+                      overlays = [
+                        (declarativePackages.mkOverlay {
+                          inherit catalog;
+                          sourceRoot = ./.;
+                        })
+                      ];
+                      config.allowUnsupportedSystem = true;
+                    };
+                  in
+                  candidate.policy-test;
+                evaluateCatalog =
+                  catalog: builtins.tryEval (builtins.deepSeq (packageForCatalog catalog).drvPath true);
                 badHost = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://unreviewed.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -677,7 +836,9 @@
                 unsupported = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts."unsupported-system" = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -688,7 +849,9 @@
                 legacyPlatforms = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     platforms.${system} = {
                       url = "https://official.invalid/legacy-tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -699,33 +862,40 @@
                 portableArtifact = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.default = {
                       url = "https://official.invalid/portable-tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
                       sourceRoot = "portable-tool-1";
-                      install = { kind = "copy-tree"; destination = "share/portable-tool"; };
+                      install = {
+                        kind = "copy-tree";
+                        destination = "share/portable-tool";
+                      };
                     };
                   };
                 };
                 wrongVersion = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "nixpkgs"; attr = "jq"; version = "0.0-invalid";
+                    kind = "nixpkgs";
+                    attr = "jq";
+                    version = "0.0-invalid";
                   };
                 };
                 unsafeDynamicLinkerPath = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
                       dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
                       dynamicLinkerExecutables = [ "../libexec/tool" ];
-                      runtimeLibraries =
-                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
-                          [ "stdenv.cc.cc.lib" ];
+                      runtimeLibraries = nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "stdenv.cc.cc.lib" ];
                       install.kind = "copy-tree";
                     };
                   };
@@ -733,7 +903,9 @@
                 unwrappedDynamicLinkerPath = evaluateCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -742,19 +914,27 @@
                     };
                   };
                 };
-                extensionlessZip = packageForCatalog
-                  (builtins.fromJSON (builtins.readFile ./tests/fixtures/extensionless-zip.json));
+                extensionlessZip = packageForCatalog (
+                  builtins.fromJSON (builtins.readFile ./tests/fixtures/extensionless-zip.json)
+                );
                 rawExecutable = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
                       format = "raw";
                       install = {
                         kind = "executables";
-                        files = [ { source = "tool"; target = "bin/tool"; } ];
+                        files = [
+                          {
+                            source = "tool";
+                            target = "bin/tool";
+                          }
+                        ];
                       };
                     };
                   };
@@ -762,7 +942,9 @@
                 dmgApplication = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.dmg";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -779,7 +961,9 @@
                 dmgCliApplication = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool-cli.dmg";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
@@ -796,17 +980,22 @@
                 dynamicLinkerExecutable = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
                       dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
-                      runtimeLibraries =
-                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
-                          [ "stdenv.cc.cc.lib" ];
+                      runtimeLibraries = nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "stdenv.cc.cc.lib" ];
                       install = {
                         kind = "executables";
-                        files = [ { source = "tool"; target = "bin/tool"; } ];
+                        files = [
+                          {
+                            source = "tool";
+                            target = "bin/tool";
+                          }
+                        ];
                       };
                     };
                   };
@@ -814,17 +1003,17 @@
                 dynamicLinkerCopyTree = packageForCatalog {
                   schemaVersion = 1;
                   packages.policy-test = {
-                    kind = "archive"; version = "1"; officialHosts = [ "official.invalid" ];
+                    kind = "archive";
+                    version = "1";
+                    officialHosts = [ "official.invalid" ];
                     artifacts.${system} = {
                       url = "https://official.invalid/tool.tar.gz";
                       sha256 = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
                       dynamicLinkerWrapper = pkgs.stdenv.hostPlatform.isLinux;
-                      dynamicLinkerExecutables =
-                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
-                          [ "libexec/tool" ];
-                      runtimeLibraries =
-                        nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux
-                          [ "stdenv.cc.cc.lib" ];
+                      dynamicLinkerExecutables = nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                        "libexec/tool"
+                      ];
+                      runtimeLibraries = nixpkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ "stdenv.cc.cc.lib" ];
                       install = {
                         kind = "copy-tree";
                         destination = "share/tool";
@@ -846,31 +1035,33 @@
               assert nixpkgs.lib.hasInfix "cp \"$src\" source/tool" rawExecutable.preInstall;
               assert nixpkgs.lib.hasSuffix ".dmg" dmgApplication.src.name;
               assert builtins.elem pkgs.undmg dmgApplication.nativeBuildInputs;
-              assert !pkgs.stdenv.hostPlatform.isDarwin
+              assert
+                !pkgs.stdenv.hostPlatform.isDarwin
                 || nixpkgs.lib.hasInfix "/usr/bin/xattr -cr" dmgApplication.installPhase;
               assert nixpkgs.lib.hasInfix "$out/libexec/tool" dmgCliApplication.installPhase;
               assert nixpkgs.lib.hasInfix "Tool CLI.app/Contents" dmgCliApplication.installPhase;
               assert !nixpkgs.lib.hasInfix "$out/Applications" dmgCliApplication.installPhase;
-              assert !pkgs.stdenv.hostPlatform.isDarwin
+              assert
+                !pkgs.stdenv.hostPlatform.isDarwin
                 || nixpkgs.lib.hasInfix "/usr/bin/xattr -cr" dmgCliApplication.installPhase;
-              assert !pkgs.stdenv.hostPlatform.isLinux
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
                 || builtins.elem pkgs.stdenv.cc.cc.lib dynamicLinkerExecutable.buildInputs;
-              assert !pkgs.stdenv.hostPlatform.isLinux
-                || nixpkgs.lib.hasInfix "--library-path"
-                  dynamicLinkerExecutable.installPhase;
-              assert !pkgs.stdenv.hostPlatform.isLinux
-                || nixpkgs.lib.hasInfix "$out/libexec/bin/tool"
-                  dynamicLinkerExecutable.installPhase;
-              assert !pkgs.stdenv.hostPlatform.isLinux
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix "--library-path" dynamicLinkerExecutable.installPhase;
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix "$out/libexec/bin/tool" dynamicLinkerExecutable.installPhase;
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
                 || builtins.elem pkgs.stdenv.cc.cc.lib dynamicLinkerCopyTree.buildInputs;
-              assert !pkgs.stdenv.hostPlatform.isLinux
-                || nixpkgs.lib.hasInfix
-                  ''mv "$out/share/tool/libexec/tool" "$out/.home-weave-dynamic/share/tool/libexec/tool"''
-                  dynamicLinkerCopyTree.installPhase;
-              assert !pkgs.stdenv.hostPlatform.isLinux
-                || nixpkgs.lib.hasInfix
-                  ''"$out/.home-weave-dynamic/share/tool/libexec/tool" "\$@"''
-                  dynamicLinkerCopyTree.installPhase;
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix ''mv "$out/share/tool/libexec/tool" "$out/.home-weave-dynamic/share/tool/libexec/tool"'' dynamicLinkerCopyTree.installPhase;
+              assert
+                !pkgs.stdenv.hostPlatform.isLinux
+                || nixpkgs.lib.hasInfix ''"$out/.home-weave-dynamic/share/tool/libexec/tool" "\$@"'' dynamicLinkerCopyTree.installPhase;
               pkgs.runCommand "declarative-package-policy" { nativeBuildInputs = [ pkgs.check-jsonschema ]; } ''
                 check-jsonschema --schemafile ${./schemas/declarative-packages-v1.schema.json} \
                   ${./tests/fixtures/declarative-packages.json}
@@ -904,7 +1095,10 @@
       lib.setup = {
         schemaVersion = 5;
         namespace = "home-weave";
-        defaults = { profile = "base"; shell = "zsh"; };
+        defaults = {
+          profile = "base";
+          shell = "zsh";
+        };
         profilesBySystem = nixpkgs.lib.mapAttrs (_: value: value.profiles) defaultResolvedBySystem;
         dotfilesBySystem = nixpkgs.lib.mapAttrs (_: value: value.dotfiles) defaultResolvedBySystem;
         profiles = defaultResolvedBySystem.x86_64-linux.profiles;
@@ -923,13 +1117,11 @@
       lib.homeWeave = {
         schemaVersion = 1;
         plugins = publicPlugins;
-        sourcesBySystem = nixpkgs.lib.genAttrs
-          [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
-          (system: {
-            nixpkgs = if system == "x86_64-darwin"
-              then inputs.nixpkgs-x86-darwin
-              else inputs.nixpkgs;
-          });
+        sourcesBySystem =
+          nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ]
+            (system: {
+              nixpkgs = if system == "x86_64-darwin" then inputs.nixpkgs-x86-darwin else inputs.nixpkgs;
+            });
       };
 
       templates.profile = {
