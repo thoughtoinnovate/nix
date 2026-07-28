@@ -12,7 +12,12 @@ sandbox = true"
 COMMAND="${1:-help}"
 [[ $# -eq 0 ]] || shift
 
-ROOT="${HOME_WEAVE_ROOT:-$HOME/.home-weave}"
+ACTIVE_ROOT_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/home-weave/active-root"
+SAVED_ACTIVE_ROOT=""
+if [[ -z "${HOME_WEAVE_ROOT:-}" && -r "$ACTIVE_ROOT_STATE" ]]; then
+  IFS= read -r SAVED_ACTIVE_ROOT <"$ACTIVE_ROOT_STATE" || SAVED_ACTIVE_ROOT=""
+fi
+ROOT="${HOME_WEAVE_ROOT:-${SAVED_ACTIVE_ROOT:-$HOME/.home-weave}}"
 BASE_URL="${HOME_WEAVE_BASE_URL:-github:thoughtoinnovate/nix}"
 TEMPLATE="${HOME_WEAVE_PROFILE_TEMPLATE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/templates/profile}"
 PROFILE_OVERLAY="${HOME_WEAVE_PROFILE_OVERLAY:-}"

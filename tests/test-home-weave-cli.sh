@@ -149,6 +149,20 @@ run_cli() {
     bash "$CLI" "$@"
 }
 
+# The shared Nix-profile launcher must honor the active root recorded by a
+# previous installation even when PATH ordering or a shell cache bypasses the
+# root-aware ~/.local/bin wrapper.
+SAVED_ROOT="$TEST_HOME/saved-active-root"
+mkdir -p "$SAVED_ROOT" "$TEST_HOME/.local/state/home-weave"
+printf '%s\n' "$SAVED_ROOT" >"$TEST_HOME/.local/state/home-weave/active-root"
+if run_cli plan 2>"$TEST_ROOT/saved-active-root-error"; then
+  printf 'plan unexpectedly accepted an incomplete saved active root\n' >&2
+  exit 1
+fi
+grep -Fq "$SAVED_ROOT is not a HomeWeave profile" \
+  "$TEST_ROOT/saved-active-root-error"
+rm -f "$TEST_HOME/.local/state/home-weave/active-root"
+
 HOME_WEAVE_NATIVE_PROVIDER="$NATIVE_PROVIDER" run_cli provider list \
   | grep -F $'native-official\tinventory,search,install,update,remove,status' >/dev/null
 
