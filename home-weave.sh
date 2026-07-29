@@ -230,7 +230,7 @@ Usage:
   home-weave plan [--root PATH] [--profile NAME]
   home-weave apply [--root PATH] [--profile NAME]
   home-weave update [--root PATH]
-  home-weave profile list|show|create|diff|switch|delete ...
+  home-weave profile [list|NAME|show|create|diff|switch|remove|delete] ...
   home-weave config validate|show [PROFILE] [--root PATH]
   home-weave status [--profile NAME] [--json]
   home-weave logs [--latest] [--tail N]
@@ -361,6 +361,7 @@ parse_common_options() {
         shift 2
         ;;
       --profile) [[ $# -ge 2 ]] || fail "--profile requires a name"; PROFILE="$2"; shift 2 ;;
+      --profile=*) PROFILE="${1#--profile=}"; [[ -n "$PROFILE" ]] || fail "--profile requires a name"; shift ;;
       --extends) [[ $# -ge 2 ]] || fail "--extends requires a name"; EXTENDS="$2"; shift 2 ;;
       --shell)
         [[ $# -ge 2 ]] || fail "--shell requires a name"
@@ -566,12 +567,12 @@ write_active_root_launcher() {
     printf '%s\n' '#!/usr/bin/env bash'
     printf '%s\n' '# HomeWeave active-root launcher'
     printf 'export HOME_WEAVE_ROOT=%q\n' "$ROOT"
-    printf '%s\n' 'profile_bin="${XDG_STATE_HOME:-$HOME/.local/state}/nix/profiles/home-weave/bin/home-weave"'
-    printf '%s\n' 'if [[ ! -x "$profile_bin" ]]; then'
-    printf '%s\n' '  printf "error: HomeWeave Nix profile launcher is unavailable: %s\\n" "$profile_bin" >&2'
+    printf '%s\n' 'repository_launcher="$HOME_WEAVE_ROOT/home-weave"'
+    printf '%s\n' 'if [[ ! -x "$repository_launcher" ]]; then'
+    printf '%s\n' '  printf "error: HomeWeave repository launcher is unavailable: %s\\n" "$repository_launcher" >&2'
     printf '%s\n' '  exit 127'
     printf '%s\n' 'fi'
-    printf '%s\n' 'exec "$profile_bin" "$@"'
+    printf '%s\n' 'exec "$repository_launcher" "$@"'
   } >"$temporary"
   chmod 0755 "$temporary"
   mv "$temporary" "$launcher"
@@ -2201,8 +2202,107 @@ record_receipt() {
     "Rollback package generation: \(.rollback.previousPackageGeneration // "none")"' "$receipt"
 }
 
+profile_status_inventory() {
+  local profiles active_profile current_store rows='[]' name declared receipt="" candidate
+  local store_path installed_packages applications closure_bytes state applied_at
+  profiles="$(profile_metadata)" || fail "HomeWeave profiles could not be evaluated"
+  active_profile="$(cat "$ROOT/.state/active-profile" 2>/dev/null || true)"
+  if [[ -z "$active_profile" && -L "$ROOT/.state/receipts/latest" ]]; then
+    receipt="$(readlink -f "$ROOT/.state/receipts/latest" 2>/dev/null || true)"
+    [[ ! -r "$receipt" ]] || active_profile="$(jq -r '.activeProfile // empty' "$receipt")"
+  fi
+  current_store="$(readlink -f "$(home_weave_package_profile)" 2>/dev/null || true)"
+
+  while IFS= read -r name; do
+    declared="$(jq -r --arg name "$name" \
+      '((.[$name].nixPackages + .[$name].shells) | unique | length)' <<<"$profiles")"
+    receipt=""
+    while IFS= read -r candidate; do
+      if jq -e --arg profile "$name" \
+        '.schemaVersion == 2 and .activeProfile == $profile' "$candidate" >/dev/null 2>&1; then
+        receipt="$candidate"
+        break
+      fi
+    done < <(find "$ROOT/.state/receipts" -maxdepth 1 -type f -name '*.json' -print 2>/dev/null | sort -r)
+
+    store_path=""
+    installed_packages=0
+    applications=0
+    closure_bytes=0
+    applied_at=""
+    state=available
+    if [[ -n "$receipt" ]]; then
+      store_path="$(jq -r '.packageProfile.currentStorePath // empty' "$receipt")"
+      applied_at="$(jq -r '.timestamp // empty' "$receipt")"
+      if [[ -n "$store_path" && -e "$store_path" ]]; then
+        installed_packages="$(jq -r '.packages | length' "$receipt")"
+        applications="$(jq -r '[.applications[]? | length] | add // 0' "$receipt")"
+        closure_bytes="$(nix --extra-experimental-features 'nix-command flakes' \
+          path-info --json-format 1 --json --closure-size "$store_path" 2>/dev/null \
+          | jq -r 'to_entries[0].value.closureSize // 0' 2>/dev/null || printf 0)"
+        [[ "$closure_bytes" =~ ^[0-9]+$ ]] || closure_bytes=0
+        state=retained
+      fi
+    fi
+    if [[ "$name" == "$active_profile" ]]; then
+      state=active
+      if [[ -z "$store_path" || "$store_path" != "$current_store" ]]; then
+        installed_packages=0
+        applications=0
+        closure_bytes=0
+        store_path=""
+      fi
+    fi
+    rows="$(jq -cn \
+      --argjson rows "$rows" --arg name "$name" --arg state "$state" \
+      --argjson declared "$declared" --argjson installed "$installed_packages" \
+      --argjson applications "$applications" --argjson closure "$closure_bytes" \
+      --arg storePath "$store_path" --arg appliedAt "$applied_at" \
+      '$rows + [{
+        name: $name, state: $state, declaredPackages: $declared,
+        installedPackages: $installed, managedApplications: $applications,
+        closureBytes: $closure,
+        storePath: (if $storePath == "" then null else $storePath end),
+        lastApplied: (if $appliedAt == "" then null else $appliedAt end)
+      }]')"
+  done < <(jq -r 'keys[]' <<<"$profiles")
+  jq -c --arg profile "$PROFILE" \
+    'if $profile == "" then . else map(select(.name == $profile)) end' <<<"$rows"
+}
+
+print_profile_status_table() {
+  local inventory="$1" closure
+  printf 'Available profiles\n'
+  printf '  %-20s %-10s %10s %10s %12s\n' \
+    PROFILE STATE DECLARED INSTALLED DISK
+  while IFS=$'\t' read -r name state declared installed closure_bytes; do
+    closure="—"
+    if [[ "$closure_bytes" =~ ^[1-9][0-9]*$ ]]; then
+      closure="$(jq -nr --argjson bytes "$closure_bytes" '
+        if $bytes < 1024 then "\($bytes) B"
+        elif $bytes < 1048576 then "\((($bytes / 1024) * 10 | round) / 10) KiB"
+        elif $bytes < 1073741824 then "\((($bytes / 1048576) * 10 | round) / 10) MiB"
+        else "\((($bytes / 1073741824) * 10 | round) / 10) GiB"
+        end')"
+    fi
+    printf '  %-20s %-10s %10s %10s %12s\n' \
+      "$name" "$state" "$declared" "$installed" "$closure"
+  done < <(jq -r '.[] | [
+    .name, .state, (.declaredPackages | tostring),
+    (.installedPackages | tostring), (.closureBytes | tostring)
+  ] | @tsv' <<<"$inventory")
+}
+
 status_command() {
-  local receipt="" candidate last_operation='null'
+  local receipt="" candidate last_operation='null' inventory active_profile
+  require_commands jq nix
+  [[ -f "$ROOT/flake.nix" ]] || fail "$ROOT is not a HomeWeave repository"
+  [[ -z "$PROFILE" ]] || validate_name "$PROFILE"
+  inventory="$(profile_status_inventory)"
+  if [[ -n "$PROFILE" ]] && [[ "$(jq 'length' <<<"$inventory")" -eq 0 ]]; then
+    fail "profile does not exist: $PROFILE"
+  fi
+  active_profile="$(cat "$ROOT/.state/active-profile" 2>/dev/null || true)"
   if [[ -s "$ROOT/.state/last-operation.json" ]] \
     && jq -e '.schemaVersion == 1' "$ROOT/.state/last-operation.json" >/dev/null 2>&1; then
     last_operation="$(jq -c . "$ROOT/.state/last-operation.json")"
@@ -2218,10 +2318,14 @@ status_command() {
   [[ -z "$receipt" || ! -r "$receipt" ]] || jq -e '.schemaVersion == 2' "$receipt" >/dev/null 2>&1 || receipt=""
   if [[ -z "$receipt" || ! -r "$receipt" ]]; then
     if "$STATUS_JSON"; then
-      jq -n --arg profile "${PROFILE:-}" --argjson lastOperation "$last_operation" \
+      jq -n --arg profile "${PROFILE:-}" --arg activeProfile "$active_profile" \
+        --argjson profiles "$inventory" --argjson lastOperation "$last_operation" \
         '{installed: false, activeProfile: (if $profile == "" then null else $profile end),
-          lastOperation: $lastOperation}'
+          selectedProfile: (if $profile == "" then null else $profile end),
+          activeProfile: (if $activeProfile == "" then null else $activeProfile end),
+          profiles: $profiles, lastOperation: $lastOperation}'
     else
+      print_profile_status_table "$inventory"
       printf 'HomeWeave has no successful activation receipt%s.\n' "${PROFILE:+ for profile $PROFILE}"
       if [[ "$last_operation" != null ]]; then
         jq -r '"Last operation: \(.command) \(.status) during \(.phase)\nOperation log:  \(.logPath)"' \
@@ -2231,9 +2335,18 @@ status_command() {
     return
   fi
   if "$STATUS_JSON"; then
-    jq --argjson lastOperation "$last_operation" '. + {lastOperation: $lastOperation}' "$receipt"
+    jq --arg profile "${PROFILE:-}" --argjson profiles "$inventory" \
+      --argjson lastOperation "$last_operation" \
+      '. + {
+        installed: true,
+        selectedProfile: (if $profile == "" then null else $profile end),
+        profiles: $profiles,
+        lastOperation: $lastOperation
+      }' "$receipt"
     return
   fi
+  print_profile_status_table "$inventory"
+  printf '\n'
   jq -r '
     "HomeWeave status",
     "  Active profile: \(.activeProfile)",
@@ -2495,6 +2608,8 @@ profile_command() {
   case "$action" in
     list)
       jq -r --arg active "$active" 'to_entries[] | (if .key == $active then "* " else "  " end) + .key + (if .value.extends == null then "" else " (extends " + .value.extends + ")" end)' <<<"$profiles"
+      printf '\nSwitch with: home-weave profile NAME\n'
+      printf 'Details with: home-weave status --profile=NAME\n'
       ;;
     show)
       [[ -n "$name" ]] || fail "profile show requires a name"; validate_name "$name"
@@ -2561,6 +2676,39 @@ profile_command() {
       confirm "Activate profile '$name' after this plan?" || fail "profile switch cancelled"
       run_profile_setup apply
       ;;
+    remove)
+      [[ -n "$name" ]] || fail "profile remove requires a name"; validate_name "$name"
+      [[ "$name" != base && "$name" != development ]] \
+        || fail "built-in profile $name cannot be removed"
+      file="$ROOT/home-weave.json"
+      jq -e --arg name "$name" '.profiles | has($name)' "$file" >/dev/null \
+        || fail "profile $name is inherited and cannot be removed from this repository; switch to another profile instead"
+      parent="$(jq -r --arg name "$name" '.profiles[$name].extends // empty' "$file")"
+      [[ -n "$parent" ]] || fail "profile $name has no removable parent transition"
+      [[ "$parent" != "$name" ]] \
+        || fail "profile $name overlays the same inherited profile and cannot be removed automatically"
+      children="$(jq -r --arg name "$name" \
+        '.profiles | to_entries[] | select(.value.extends == $name) | .key' "$file")"
+      [[ -z "$children" ]] \
+        || fail "profile $name still has child profiles: $(paste -sd, <<<"$children")"
+      if [[ "$active" == "$name" ]]; then
+        printf 'Removing active profile %s will switch to its parent %s.\n' "$name" "$parent"
+        PROFILE="$parent"
+        run_profile_setup plan
+        confirm "Apply parent profile '$parent' and remove profile '$name'?" \
+          || fail "profile removal cancelled"
+        run_profile_setup apply
+      else
+        confirm "Remove inactive profile definition '$name'?" \
+          || fail "profile removal cancelled"
+      fi
+      jq --arg name "$name" 'del(.profiles[$name])' "$file" >"$file.tmp.$$"
+      mv "$file.tmp.$$" "$file"
+      printf 'Removed profile definition %s.\n' "$name"
+      printf 'Profile-owned active packages, applications, and dotfiles were reconciled through %s.\n' "$parent"
+      printf 'Provider-retained or pre-existing applications remain under their provider lifecycle.\n'
+      printf 'Previous Nix generations remain available for rollback until history or garbage collection removes them.\n'
+      ;;
     delete)
       [[ -n "$name" ]] || fail "profile delete requires a name"; validate_name "$name"
       [[ "$name" != base && "$name" != development ]] || fail "built-in profile $name cannot be deleted"
@@ -2578,6 +2726,19 @@ profile_command() {
       fi
       ;;
     *) fail "unknown profile command: $action" ;;
+  esac
+}
+
+normalize_profile_command() {
+  local action="${POSITIONAL_ARGS[0]:-list}"
+  case "$action" in
+    list|show|create|diff|switch|remove|delete) ;;
+    use)
+      POSITIONAL_ARGS=(switch "${POSITIONAL_ARGS[@]:1}")
+      ;;
+    *)
+      POSITIONAL_ARGS=(switch "$action" "${POSITIONAL_ARGS[@]:1}")
+      ;;
   esac
 }
 
@@ -3733,13 +3894,14 @@ config_command() {
 
 POSITIONAL_ARGS=()
 parse_common_options "$@"
+[[ "$COMMAND" != profile ]] || normalize_profile_command
 [[ "$COMMAND" != uninstall ]] || normalize_uninstall_mode
 normalize_root
 
 case "$COMMAND" in
   setup|plan|apply|update|restore|sync|uninstall|nuke-all|snapshot) show_homeweave_banner ;;
   profile)
-    case "${POSITIONAL_ARGS[0]:-list}" in create|switch|delete) show_homeweave_banner ;; esac
+    case "${POSITIONAL_ARGS[0]:-list}" in create|switch|remove|delete) show_homeweave_banner ;; esac
     ;;
 esac
 
@@ -3750,7 +3912,7 @@ esac
 case "$COMMAND" in
   setup|apply|update|uninstall|nuke-all|snapshot) acquire_operation_lock ;;
   profile)
-    case "${POSITIONAL_ARGS[0]:-list}" in create|switch|delete) acquire_operation_lock ;; esac
+    case "${POSITIONAL_ARGS[0]:-list}" in create|switch|remove|delete) acquire_operation_lock ;; esac
     ;;
 esac
 

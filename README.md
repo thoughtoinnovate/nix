@@ -255,8 +255,11 @@ home-weave profile list
 home-weave profile show development
 home-weave profile create work --extends development
 home-weave profile diff work
+home-weave profile work
 home-weave profile switch work
+home-weave profile remove work
 home-weave status
+home-weave status --profile=development
 home-weave status --json
 home-weave logs
 home-weave logs --latest --tail 100
@@ -298,6 +301,20 @@ After a successful apply, HomeWeave installs a small user-local launcher at
 `home-weave plan`, `apply`, and `update` target that profile even when setup
 used a custom root. An explicit `--root` or `HOME_WEAVE_ROOT` still takes
 precedence.
+
+`home-weave profile` lists every available profile. `home-weave profile NAME`
+is a guided shorthand for `home-weave profile switch NAME`: it plans first and
+asks before activation. `home-weave profile remove NAME` switches an active
+local profile to its parent, reconciles profile-owned packages, applications,
+and dotfiles, and then removes its local definition. Inherited profiles remain
+defined by their parent distribution, while pre-existing or provider-retained
+applications remain under that provider's lifecycle.
+
+`home-weave status` shows all available profiles, declared and last-installed
+package counts, and retained Nix closure size without building inactive
+profiles. Use `home-weave status --profile=NAME` for one profile. Closure sizes
+include shared dependencies and therefore must not be added together as
+exclusive disk usage.
 
 The launcher remembers one active repository root. Within that repository,
 select a named profile explicitly, for example `home-weave apply --profile

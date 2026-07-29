@@ -49,6 +49,10 @@ grep -Fq 'write_active_root_launcher' "$CLI" || {
   printf 'successful apply does not install a root-aware HomeWeave launcher\n' >&2
   exit 1
 }
+grep -Fq 'repository_launcher="$HOME_WEAVE_ROOT/home-weave"' "$CLI" || {
+  printf 'active-root launcher bypasses the distribution provider context\n' >&2
+  exit 1
+}
 grep -Fq 'remove_active_root_launcher' "$CLI" || {
   printf 'nuke does not remove the root-aware HomeWeave launcher\n' >&2
   exit 1
@@ -236,6 +240,17 @@ PATH="$profile_bin:$PATH" run_cli profile create work-fish --extends work --shel
 jq -e '.profiles["work-fish"] ==
   {extends:"work",shells:["fish"],primaryShell:"fish",exclude:{},packageGroups:[],dotfiles:["custom"],packages:{nix:[]}}' \
   "$ROOT/home-weave.json" >/dev/null
+PATH="$profile_bin:$PATH" run_cli profile create removable --extends work
+PATH="$profile_bin:$PATH" run_cli profile remove removable --yes
+jq -e '.profiles | has("removable") | not' "$ROOT/home-weave.json" >/dev/null
+PATH="$profile_bin:$PATH" run_cli profile list \
+  | grep -Fq 'Switch with: home-weave profile NAME'
+if PATH="$profile_bin:$PATH" run_cli profile missing \
+  >/dev/null 2>"$TEST_ROOT/profile-shorthand-error"; then
+  printf 'profile shorthand unexpectedly accepted a missing profile\n' >&2
+  exit 1
+fi
+grep -Fq 'profile does not exist: missing' "$TEST_ROOT/profile-shorthand-error"
 
 # A distribution setup creates an inheritance-only child. Parent assets stay
 # in the pinned flake input and are never copied into the generated repository.
@@ -341,13 +356,43 @@ fi
 grep -Fq 'another HomeWeave operation' "$TEST_ROOT/lock-error"
 rm -rf "${ROOT}.operation-lock"
 
-run_cli status --json | jq -e '.installed == false' >/dev/null
+status_bin="$TEST_ROOT/status-bin"
+mkdir -p "$status_bin"
+write_bash_script "$status_bin/nix"
+cat >>"$status_bin/nix" <<'EOF'
+case "$*" in
+  *lib.setup.profilesBySystem*)
+    printf '%s\n' '{"base":{"extends":null,"shells":["zsh"],"nixPackages":["git"],"primaryShell":"zsh"},"development":{"extends":"base","shells":["zsh"],"nixPackages":["git","jq"],"primaryShell":"zsh"}}'
+    ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$status_bin/nix"
+run_status_cli() {
+  PATH="$status_bin:$PATH" run_cli status "$@"
+}
+
+run_status_cli --json | jq -e '
+  .installed == false
+  and (.profiles | map(.name) | index("base")) != null
+  and all(.profiles[]; (.declaredPackages | type) == "number")
+' >/dev/null
+run_status_cli --profile=base --json | jq -e '
+  .selectedProfile == "base"
+  and (.profiles | length) == 1
+  and .profiles[0].name == "base"
+' >/dev/null
+if run_status_cli --profile=missing >/dev/null 2>"$TEST_ROOT/missing-status-profile"; then
+  printf 'status unexpectedly accepted a missing profile\n' >&2
+  exit 1
+fi
+grep -Fq 'profile does not exist: missing' "$TEST_ROOT/missing-status-profile"
 mkdir -p "$ROOT/.state/receipts"
 cat >"$ROOT/.state/receipts/legacy.json" <<'EOF_LEGACY'
 {"schemaVersion":1,"activeProfile":"base"}
 EOF_LEGACY
 ln -s legacy.json "$ROOT/.state/receipts/latest"
-run_cli status --json | jq -e '.installed == false' >/dev/null
+run_status_cli --json | jq -e '.installed == false' >/dev/null
 jq -n --arg pluginState "$TEST_HOME/.local/share/home-weave/base/plugins/sdkman" \
   --arg legacyNvm '~/.nvm' \
   --arg profile "$TEST_HOME/.local/state/nix/profiles/home-weave" \
@@ -365,7 +410,7 @@ jq -n --arg pluginState "$TEST_HOME/.local/share/home-weave/base/plugins/sdkman"
     previousStowGeneration: "dotfiles/current.previous"}}' \
   >"$ROOT/.state/receipts/fixture.json"
 ln -sfn fixture.json "$ROOT/.state/receipts/latest"
-run_cli status --json | jq -e '.schemaVersion == 2 and .activeProfile == "base" and .nixpkgsRevision == "fixture"' >/dev/null
+run_status_cli --json | jq -e '.schemaVersion == 2 and .activeProfile == "base" and .nixpkgsRevision == "fixture"' >/dev/null
 # Snapshots preserve declarative HomeWeave state, canonicalize safe exports,
 # and include only redacted secret variable names.
 cat >"$TEST_HOME/.home_weave_profile" <<'EOF'
@@ -453,7 +498,7 @@ test -n "$(find "$latest_log" -prune -perm 600 -print)"
 run_cli logs | grep -Fq '.log'
 latest_log_output="$(run_cli logs --latest --tail 20)"
 grep -Fq 'activation failed; adopted configurations were restored' <<<"$latest_log_output"
-run_cli status --json | jq -e '.lastOperation.status == "failed" and .lastOperation.logPath != null' >/dev/null
+run_status_cli --json | jq -e '.lastOperation.status == "failed" and .lastOperation.logPath != null' >/dev/null
 cp "$TEST_ROOT/setup.sh.saved" "$ROOT/setup.sh"
 
 provider="$TEST_ROOT/fake-provider"

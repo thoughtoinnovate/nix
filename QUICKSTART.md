@@ -387,11 +387,33 @@ revision when verifying the complete installation that other users will get.
 ~/.home-weave/home-weave profile list
 ~/.home-weave/home-weave profile create work --extends development
 ~/.home-weave/home-weave profile diff work
+~/.home-weave/home-weave profile work
 ~/.home-weave/home-weave profile switch work
 ```
 
 `profile switch` shows a plan first and records the new profile only after a
 successful activation.
+
+`profile NAME` is the shorter guided form of `profile switch NAME`. To remove
+a locally defined profile and reconcile its active software back to the parent:
+
+```sh
+~/.home-weave/home-weave profile remove work
+```
+
+Inherited profiles cannot be deleted from a child repository. Switch away from
+them or change the parent distribution instead. Pre-existing and
+provider-retained applications remain owned by their provider.
+
+Inspect package counts and retained disk usage for all profiles or one profile:
+
+```sh
+~/.home-weave/home-weave status
+~/.home-weave/home-weave status --profile=work
+```
+
+Status never builds an inactive profile merely to calculate size. A profile
+without a retained activation store path displays no disk size.
 
 Validate the canonical manifest and inspect its Stow mappings at any time:
 
